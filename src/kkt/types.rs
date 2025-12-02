@@ -15,6 +15,16 @@ pub enum ConnectionType {
     Tcp,
 }
 
+impl ConnectionType {
+    pub fn raw(&self) -> &str {
+        match self {
+            ConnectionType::Usb => "usb",
+            ConnectionType::Com => "com",
+            ConnectionType::Tcp => "tcp",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SellTask {
     pub taxation_type: Option<String>,
@@ -98,4 +108,3 @@ pub struct TaxEntry {
     pub tax_type: String,
     pub sum: f64,
 }
-

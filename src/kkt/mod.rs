@@ -7,14 +7,14 @@ use std::process::{Child, Command, Stdio};
 use tokio::process::Command as TokioCommand;
 
 pub struct Kkt {
-    config: Option<types::KktConfig>,
+    config: KktConfig,
     server_process: Option<Child>,
 }
 
 impl Kkt {
     pub fn new(config: types::KktConfig) -> Self {
         Self {
-            config: Some(config),
+            config: config,
             server_process: None,
         }
     }
@@ -52,12 +52,17 @@ impl Kkt {
     }
 
     pub async fn run_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let _config = self.config.as_ref().ok_or("Missing KKT configuration")?;
-
         self.stop_server().await?;
 
         let bin_path = "./libs/kkt";
         let mut cmd = Command::new(bin_path);
+        cmd.args(["--type", self.config.connection_type.raw()]);
+        if let Some(v) = &self.config.address {
+            cmd.args(["--address", &v]);
+        };
+        if let Some(v) = &self.config.port {
+            cmd.args(["--port", &v.to_string()]);
+        }
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
 
@@ -108,6 +113,29 @@ impl Kkt {
             .json::<HashMap<String, serde_json::Value>>()
             .await?;
         Ok(data)
+    }
+
+    pub async fn connect(
+        &self,
+    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+        self.send("connect", "POST", None).await
+    }
+
+    pub async fn disconnect(
+        &self,
+    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+        self.send("disconnect", "POST", None).await
+    }
+
+    pub async fn check_connection(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let response = self.send("check", "GET", None).await;
+        match response {
+            Ok(v) => Ok(match &v["connected"] {
+                serde_json::Value::Bool(v) => *v,
+                _ => false,
+            }),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn open_shift(

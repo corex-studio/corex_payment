@@ -18,8 +18,12 @@ impl Terminal {
     }
 
     pub async fn connect(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        if matches!(self.config.protocol, crate::acquiring::types::ProtocolType::Inpas) {
-            let mut conn: Box<dyn BaseConnection> = Box::new(InpasConnection::new(self.config.clone()));
+        if matches!(
+            self.config.protocol,
+            crate::acquiring::types::ProtocolType::Inpas
+        ) {
+            let mut conn: Box<dyn BaseConnection> =
+                Box::new(InpasConnection::new(self.config.clone()));
             let result = conn.connect().await?;
             self.connection = Some(Arc::new(Mutex::new(conn)));
             return Ok(result);
@@ -29,13 +33,29 @@ impl Terminal {
             ConnectionType::Tcp => Box::new(TcpConnection::new(self.config.clone())),
             ConnectionType::Usb => Box::new(UsbConnection::new(self.config.clone())),
             ConnectionType::Bluetooth => {
-                return Err("Bluetooth connection not yet implemented".into())
+                return Err("Bluetooth connection not yet implemented".into());
             }
         };
 
         let result = conn.connect().await?;
         self.connection = Some(Arc::new(Mutex::new(conn)));
         Ok(result)
+    }
+
+    async fn connection_or_err(
+        &mut self,
+    ) -> Result<Arc<Mutex<Box<dyn BaseConnection + 'static>>>, Box<dyn std::error::Error>> {
+        let conn = self
+            .connection
+            .as_ref()
+            .ok_or("Not connected to terminal")?;
+
+        let conn_guard = conn.lock().await;
+        if !conn_guard.is_connected() {
+            return Err("Not connected to terminal".into());
+        }
+        drop(conn_guard);
+        Ok(Arc::clone(conn))
     }
 
     pub async fn disconnect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -52,36 +72,14 @@ impl Terminal {
         amount: u64,
         currency: Option<String>,
     ) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self
-            .connection
-            .as_ref()
-            .ok_or("Not connected to terminal")?;
-
-        let conn_guard = conn.lock().await;
-        if !conn_guard.is_connected() {
-            return Err("Not connected to terminal".into());
-        }
-        drop(conn_guard);
-
-        let conn = Arc::clone(conn);
+        let conn = self.connection_or_err().await?;
         let context = crate::acquiring::commands::base::CommandContext::new(conn);
         let command = PaymentCommand::new(amount, currency);
         command.execute(context).await
     }
 
     pub async fn totals(&mut self) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self
-            .connection
-            .as_ref()
-            .ok_or("Not connected to terminal")?;
-
-        let conn_guard = conn.lock().await;
-        if !conn_guard.is_connected() {
-            return Err("Not connected to terminal".into());
-        }
-        drop(conn_guard);
-
-        let conn = Arc::clone(conn);
+        let conn = self.connection_or_err().await?;
         let context = crate::acquiring::commands::base::CommandContext::new(conn);
         let command = TotalsCommand::new();
         command.execute(context).await
@@ -92,18 +90,7 @@ impl Terminal {
         amount: u64,
         currency: Option<String>,
     ) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self
-            .connection
-            .as_ref()
-            .ok_or("Not connected to terminal")?;
-
-        let conn_guard = conn.lock().await;
-        if !conn_guard.is_connected() {
-            return Err("Not connected to terminal".into());
-        }
-        drop(conn_guard);
-
-        let conn = Arc::clone(conn);
+        let conn = self.connection_or_err().await?;
         let context = crate::acquiring::commands::base::CommandContext::new(conn);
         let command = RefundCommand::new(amount, currency);
         command.execute(context).await
@@ -119,4 +106,3 @@ impl Terminal {
         false
     }
 }
-
