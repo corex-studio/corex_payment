@@ -40,7 +40,12 @@ impl Kkt {
     }
 
     pub async fn stop_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let processes = self.get_open_processes().await?;
+        let processes = match self.get_open_processes().await {
+            Ok(v) => v,
+            Err(_) => {
+                return Ok(());
+            }
+        };
         for pid in processes {
             let _ = TokioCommand::new("kill")
                 .arg("-TERM")
