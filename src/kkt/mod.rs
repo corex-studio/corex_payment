@@ -182,4 +182,10 @@ impl Kkt {
         let data = serde_json::json!({ "number": id });
         self.send("document", "GET", Some(&data)).await
     }
+
+    pub async fn info(
+        &self,
+    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+        self.send("info", "GET", None).await
+    }
 }
