@@ -3,9 +3,12 @@ pub mod types;
 pub use types::*;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::str::FromStr;
 use tokio::process::Command as TokioCommand;
 
+#[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub struct Kkt {
@@ -116,7 +119,11 @@ impl Kkt {
     pub async fn run_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.stop_server().await?;
 
-        let bin_path = "./libs/kkt";
+        #[allow(unused_mut)]
+        let mut bin_path = PathBuf::from_str("./libs/kkt")?;
+        #[cfg(target_os = "windows")]
+        bin_path.set_extension("exe");
+
         let mut cmd = Command::new(bin_path);
         cmd.args(["--type", self.config.connection_type.raw()]);
         if let Some(v) = &self.config.address {
