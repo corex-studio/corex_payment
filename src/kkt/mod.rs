@@ -8,8 +8,8 @@ use std::process::{Child, Command, Stdio};
 use std::str::FromStr;
 use tokio::process::Command as TokioCommand;
 
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+// #[cfg(target_os = "windows")]
+// const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub struct Kkt {
     config: KktConfig,
@@ -135,9 +135,6 @@ impl Kkt {
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
 
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-
         self.server_process = Some(cmd.spawn()?);
         Ok(())
     }
@@ -160,7 +157,7 @@ impl Kkt {
             if let Some(data) = data {
                 if let Some(obj) = data.as_object() {
                     for (key, value) in obj {
-                        req = req.query(&[(key, value.as_str().unwrap_or(""))]);
+                        req = req.query(&[(key, value)]);
                     }
                 }
             }
