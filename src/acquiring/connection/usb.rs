@@ -2,7 +2,7 @@ use crate::acquiring::connection::BaseConnection;
 use crate::acquiring::types::ConnectionConfig;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 
 pub struct UsbConnection {
@@ -32,6 +32,10 @@ impl BaseConnection for UsbConnection {
     }
 
     async fn connect(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.connected {
+            return Ok(true);
+        }
+
         let path = self
             .config
             .ncom
@@ -68,7 +72,10 @@ impl BaseConnection for UsbConnection {
         }
     }
 
-    async fn read(&mut self, timeout_ms: Option<u32>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    async fn read(
+        &mut self,
+        timeout_ms: Option<u32>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         if !self.connected {
             return Err("Not connected".into());
         }
@@ -94,4 +101,3 @@ impl BaseConnection for UsbConnection {
         }
     }
 }
-
