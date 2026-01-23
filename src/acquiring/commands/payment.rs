@@ -1,7 +1,7 @@
-use crate::acquiring::commands::base::{execute_command, CommandContext};
-use crate::acquiring::protocol::inpas::InpasField;
+use crate::acquiring::commands::base::{CommandContext, execute_command};
 use crate::acquiring::protocol::TlvItem;
-use crate::acquiring::types::{get_tag_definition, TerminalResponse};
+use crate::acquiring::protocol::inpas::InpasField;
+use crate::acquiring::types::{TerminalResponse, get_tag_definition};
 
 pub struct PaymentCommand {
     amount: u64,
@@ -22,7 +22,7 @@ impl PaymentCommand {
         let transaction_amount_tag =
             get_tag_definition(0x04).expect("TRANSACTION_AMOUNT tag not found");
 
-        let mut items = vec![
+        vec![
             TlvItem {
                 tag: message_id_tag.tag,
                 length: 3,
@@ -41,20 +41,20 @@ impl PaymentCommand {
                 value: context.string_to_bytes(&context.int_to_string(self.amount, 12)),
                 definition: Some(transaction_amount_tag),
             },
-        ];
+        ]
 
-        if let Some(currency_tag) = get_tag_definition(0x1b) {
-            if let Ok(currency_num) = self.currency.parse::<u32>() {
-                items.push(TlvItem {
-                    tag: currency_tag.tag,
-                    length: 3,
-                    value: context.int_to_bcd(currency_num as u64, 3),
-                    definition: Some(currency_tag),
-                });
-            }
-        }
+        // if let Some(currency_tag) = get_tag_definition(0x1b) {
+        //     if let Ok(currency_num) = self.currency.parse::<u32>() {
+        //         items.push(TlvItem {
+        //             tag: currency_tag.tag,
+        //             length: 3,
+        //             value: context.int_to_bcd(currency_num as u64, 3),
+        //             definition: Some(currency_tag),
+        //         });
+        //     }
+        // }
 
-        items
+        // items
     }
 
     fn prepare_inpas(&self, _context: &CommandContext) -> Vec<InpasField> {
@@ -86,4 +86,3 @@ impl PaymentCommand {
         .await
     }
 }
-

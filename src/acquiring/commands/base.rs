@@ -137,18 +137,18 @@ pub async fn execute_command(
         };
         let (response_type, response_items) = TtkBuffer::parse_message(&response_data)?;
 
-        if response_type == MessageType::ServerResponse {
-            if response_items.iter().any(|item| {
+        if response_type == MessageType::ServerResponse
+            && response_items.iter().any(|item| {
                 item.definition
                     .map(|d| d.name == "Response Code")
                     .unwrap_or(false)
-            }) {
-                let response_data = TtkBuffer::items_to_object(&response_items);
-                return Ok(build_terminal_response_from_raw(
-                    ProtocolType::Ttk,
-                    response_data,
-                ));
-            }
+            })
+        {
+            let response_data = TtkBuffer::items_to_object(&response_items);
+            return Ok(build_terminal_response_from_raw(
+                ProtocolType::Ttk,
+                response_data,
+            ));
         }
     }
 }

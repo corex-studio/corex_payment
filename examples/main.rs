@@ -4,21 +4,21 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
-    let config = KktConfig {
-        connection_type: KktConnectionType::Usb,
-        address: None,
-        port: None,
-    };
-
-    let mut fiscal = Kkt::new(config);
-    let result = fiscal.run_server().await;
-    match result {
-        Ok(_) => println!("YES OK OK HUYOK"),
-        Err(e) => println!("NO NO NO {e:?}"),
-    }
-    println!("Run!!!");
-    thread::sleep(Duration::from_secs(3));
-    println!("Slept");
+    // let config = KktConfig {
+    //     connection_type: KktConnectionType::Usb,
+    //     address: None,
+    //     port: None,
+    // };
+    //
+    // let mut fiscal = Kkt::new(config);
+    // let result = fiscal.run_server().await;
+    // match result {
+    //     Ok(_) => println!("YES OK OK HUYOK"),
+    //     Err(e) => println!("NO NO NO {e:?}"),
+    // }
+    // println!("Run!!!");
+    // thread::sleep(Duration::from_secs(3));
+    // println!("Slept");
 
     // let operator = Operator {
     //     name: "asdf".to_string(),
@@ -53,13 +53,13 @@ async fn main() {
     //     taxes: None,
     // };
 
-    let response = fiscal.info().await;
-    match response {
-        Ok(v) => println!("Successful: {v:?}"),
-        Err(e) => println!("Error: {e:?}"),
-    }
-
-    let _ = fiscal.stop_server().await;
+    // let response = fiscal.document(30).await;
+    // match response {
+    //     Ok(v) => println!("Successful: {v:?}"),
+    //     Err(e) => println!("Error: {e:?}"),
+    // }
+    //
+    // let _ = fiscal.stop_server().await;
 }
 //
 // fn sync_fun() {

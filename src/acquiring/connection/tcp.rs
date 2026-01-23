@@ -3,7 +3,7 @@ use crate::acquiring::types::ConnectionConfig;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 pub struct TcpConnection {
     config: ConnectionConfig,
@@ -32,7 +32,10 @@ impl BaseConnection for TcpConnection {
     }
 
     async fn connect(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        let port = self.config.port.ok_or("Port is required for TCP connection")?;
+        let port = self
+            .config
+            .port
+            .ok_or("Port is required for TCP connection")?;
         let address = self
             .config
             .address
@@ -73,7 +76,10 @@ impl BaseConnection for TcpConnection {
         }
     }
 
-    async fn read(&mut self, timeout_ms: Option<u32>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    async fn read(
+        &mut self,
+        timeout_ms: Option<u32>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         if !self.connected {
             return Err("Not connected".into());
         }
@@ -99,4 +105,3 @@ impl BaseConnection for TcpConnection {
         }
     }
 }
-
