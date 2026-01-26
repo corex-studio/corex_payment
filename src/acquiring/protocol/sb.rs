@@ -1,11 +1,14 @@
 use anyhow::{Result, anyhow};
+use serde::Serialize;
 use std::{
+    fmt::Display,
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use async_trait::async_trait;
+use encoding_rs::WINDOWS_1251;
 
 use crate::{
     ConnectionConfig, ConnectionType, TerminalResponse,
@@ -22,14 +25,15 @@ impl SBAdapter {
         Self { config, dir }
     }
 
-    pub fn read_e(&self) -> Result<Vec<String>> {
-        let e_data = self.dir.join("e");
-        if !e_data.exists() {
-            return Err(anyhow!("Missing e file"));
-        }
-
-        let bytes = fs::read(e_data)?;
-        Ok(extract_strings(&bytes))
+    pub fn read_e(&self) -> Result<SbPilotE> {
+        parse_sb_pilot_e(self.dir.join("e"))
+        // let e_data = self.dir.join("e");
+        // if !e_data.exists() {
+        //     return Err(anyhow!("Missing e file"));
+        // }
+        //
+        // let bytes = fs::read(e_data)?;
+        // Ok(extract_strings(&bytes))
     }
 
     fn get_pilot(&self) -> Result<PathBuf> {
@@ -158,7 +162,7 @@ impl Acquiring for SBAdapter {
 
     async fn payment(&mut self, amount: u64, _: Option<String>) -> Result<TerminalResponse> {
         let mut cmd = self.get_cmd()?;
-        cmd.args(&["1", &format!("{}", amount)]);
+        cmd.args(["1", &format!("{}", amount)]);
 
         let res = cmd.output()?;
         let success = res.status.success();
@@ -181,7 +185,7 @@ impl Acquiring for SBAdapter {
 
     async fn refund(&mut self, amount: u64, _: Option<String>) -> Result<TerminalResponse> {
         let mut cmd = self.get_cmd()?;
-        cmd.args(&["3", &format!("{}", amount)]);
+        cmd.args(["3", &format!("{}", amount)]);
 
         let res = cmd.output()?;
         let success = res.status.success();
@@ -224,6 +228,12 @@ pub struct IniEditor {
     lines: Vec<String>,
 }
 
+impl Display for IniEditor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.lines.join("\n"))
+    }
+}
+
 impl IniEditor {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path)?;
@@ -257,10 +267,6 @@ impl IniEditor {
             Ok(_) => Ok(()),
             Err(e) => Err(anyhow!(e)),
         }
-    }
-
-    pub fn to_string(&self) -> String {
-        self.lines.join("\n")
     }
 
     fn set_value(&mut self, key: &str, new_value: &str) {
@@ -323,4 +329,145 @@ fn extract_strings(data: &[u8]) -> Vec<String> {
 fn keep_only_digits(s: String) -> String {
     // Итератор по char + filter + collect в новый String
     s.chars().filter(|c| c.is_numeric()).collect()
+}
+
+#[derive(Debug, Serialize)]
+pub struct SbPilotE {
+    pub result_code: i32,
+    pub result_text: String,
+
+    pub masked_pan_or_phone: Option<String>,
+    pub terminal_serial: Option<String>,
+    pub card_expiry: Option<String>,
+    pub auth_code: Option<String>,
+    pub operation_id: Option<String>,
+    pub card_type: Option<String>,
+    pub is_sber_card: Option<bool>,
+    pub terminal_id: Option<String>,
+    pub datetime: Option<String>,
+    pub rrn: Option<String>,
+    pub card_hash: Option<String>,
+    pub bonus_amount: Option<u64>,
+    pub merchant_id: Option<String>,
+    pub monitoring_type: Option<String>,
+    pub monitoring_state: Option<String>,
+    pub monitoring_message: Option<String>,
+    pub loyalty_program: Option<u32>,
+    pub user_reply: Option<String>,
+    pub request_id: Option<String>,
+    pub flags: Option<u32>,
+    pub mifare_loyalty: Option<String>,
+    pub has_vas: Option<bool>,
+    pub hash_type: Option<String>,
+    pub extended_hash: Option<String>,
+    pub par: Option<String>,
+    pub card_type_id: Option<String>,
+    pub entry_mode: Option<String>,
+    pub sbp_url: Option<String>,
+    pub sbp_order_id: Option<String>,
+    pub vendor_terminal_serial: Option<String>,
+}
+
+pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
+    let bytes = fs::read(path)?;
+    let (text, _, _) = WINDOWS_1251.decode(&bytes);
+    let lines: Vec<String> = text
+        .into_owned()
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect();
+
+    // 1. Result code
+    let (code, text) = lines[0]
+        .split_once(',')
+        .ok_or(anyhow!("Invalid result line"))?;
+
+    let result_code: i32 = code.parse()?;
+
+    let mut i = 1;
+
+    let mut next = || {
+        if i < lines.len() {
+            let v = lines[i].clone();
+            i += 1;
+            Some(v)
+        } else {
+            None
+        }
+    };
+
+    let mut e = SbPilotE {
+        result_code,
+        result_text: text.to_string(),
+
+        masked_pan_or_phone: None,
+        terminal_serial: None,
+        card_expiry: None,
+        auth_code: None,
+        operation_id: None,
+        card_type: None,
+        is_sber_card: None,
+        terminal_id: None,
+        datetime: None,
+        rrn: None,
+        card_hash: None,
+        bonus_amount: None,
+        merchant_id: None,
+        monitoring_type: None,
+        monitoring_state: None,
+        monitoring_message: None,
+        loyalty_program: None,
+        user_reply: None,
+        request_id: None,
+        flags: None,
+        mifare_loyalty: None,
+        has_vas: None,
+        hash_type: None,
+        extended_hash: None,
+        par: None,
+        card_type_id: None,
+        entry_mode: None,
+        sbp_url: None,
+        sbp_order_id: None,
+        vendor_terminal_serial: None,
+    };
+
+    if result_code != 0 {
+        return Ok(e);
+    }
+
+    e.masked_pan_or_phone = next();
+    e.terminal_serial = next();
+    e.card_expiry = next();
+    e.auth_code = next();
+    e.operation_id = next();
+    e.card_type = next();
+    e.is_sber_card = next().map(|v| v == "1");
+    e.terminal_id = next();
+    e.datetime = next();
+    e.rrn = next();
+    next(); // sb_pilot version (skip)
+    e.card_hash = next();
+    next(); // track3
+    e.bonus_amount = next().and_then(|v| v.parse().ok());
+    e.merchant_id = next();
+    e.monitoring_type = next();
+    e.monitoring_state = next();
+    e.monitoring_message = next();
+    e.loyalty_program = next().and_then(|v| v.parse().ok());
+    e.user_reply = next();
+    e.request_id = next();
+    e.flags = next().and_then(|v| u32::from_str_radix(&v, 16).ok());
+    e.mifare_loyalty = next();
+    e.has_vas = next().map(|v| v == "1");
+    e.hash_type = next();
+    e.extended_hash = next();
+    e.par = next();
+    e.card_type_id = next();
+    e.entry_mode = next();
+    e.sbp_url = next();
+    e.sbp_order_id = next();
+    e.vendor_terminal_serial = next();
+
+    Ok(e)
 }

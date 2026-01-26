@@ -34,6 +34,7 @@ pub struct ConnectionConfig {
     pub dc_host: Option<String>,
     pub ncom: Option<String>,
     pub baudrate: Option<u32>,
+    pub sc552_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
