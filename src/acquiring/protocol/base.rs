@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use crate::TerminalResponse;
 
 #[async_trait]
-pub trait Acquiring {
+pub trait Acquiring: Send + Sync {
     async fn connected(&self) -> bool;
 
     async fn connect(&mut self) -> Result<bool>;
