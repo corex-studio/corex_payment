@@ -1,108 +1,61 @@
-use crate::acquiring::commands::{PaymentCommand, RefundCommand, TotalsCommand};
-use crate::acquiring::connection::{BaseConnection, InpasConnection, TcpConnection, UsbConnection};
-use crate::acquiring::types::{ConnectionConfig, ConnectionType, TerminalResponse};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::ProtocolType;
+use crate::acquiring::protocol::base::Acquiring;
+use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
+use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
+use anyhow::Result;
+use std::path::PathBuf;
+use std::str::FromStr;
 
 pub struct Terminal {
-    connection: Option<Arc<Mutex<Box<dyn BaseConnection>>>>,
-    config: ConnectionConfig,
+    adapter: Box<dyn Acquiring>,
 }
 
 impl Terminal {
     pub fn new(config: ConnectionConfig) -> Self {
-        Self {
-            connection: None,
-            config,
-        }
-    }
+        let sc552 = PathBuf::from_str("libs/sc552/").unwrap_or_else(|_| {
+            let mut p = PathBuf::new();
+            p.push("C:/");
+            p.push("sc552/");
+            p
+        });
 
-    pub async fn connect(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        if matches!(
-            self.config.protocol,
-            crate::acquiring::types::ProtocolType::Inpas
-        ) {
-            let mut conn: Box<dyn BaseConnection> =
-                Box::new(InpasConnection::new(self.config.clone()));
-            let result = conn.connect().await?;
-            self.connection = Some(Arc::new(Mutex::new(conn)));
-            return Ok(result);
-        }
-
-        let mut conn: Box<dyn BaseConnection> = match self.config.connection_type {
-            ConnectionType::Tcp => Box::new(TcpConnection::new(self.config.clone())),
-            ConnectionType::Usb => Box::new(UsbConnection::new(self.config.clone())),
-            ConnectionType::Bluetooth => {
-                return Err("Bluetooth connection not yet implemented".into());
-            }
+        let adapter: Box<dyn Acquiring> = match config.protocol {
+            ProtocolType::Ttk => Box::new(SBAdapter::new(config.clone(), sc552)),
+            ProtocolType::Inpas => Box::new(InpasAdapter::new(config.clone())),
         };
 
-        let result = conn.connect().await?;
-        self.connection = Some(Arc::new(Mutex::new(conn)));
-        Ok(result)
+        Self { adapter }
     }
 
-    async fn connection_or_err(
-        &mut self,
-    ) -> Result<Arc<Mutex<Box<dyn BaseConnection + 'static>>>, Box<dyn std::error::Error>> {
-        let conn = self
-            .connection
-            .as_ref()
-            .ok_or("Not connected to terminal")?;
-
-        let conn_guard = conn.lock().await;
-        if !conn_guard.is_connected() {
-            return Err("Not connected to terminal".into());
-        }
-        drop(conn_guard);
-        Ok(Arc::clone(conn))
+    pub async fn connect(&mut self) -> Result<bool> {
+        self.adapter.connect().await
     }
 
-    pub async fn disconnect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(conn) = &self.connection {
-            let mut conn = conn.lock().await;
-            conn.disconnect().await?;
-        }
-        self.connection = None;
-        Ok(())
+    pub async fn disconnect(&mut self) -> Result<()> {
+        self.adapter.disconnect().await
     }
 
     pub async fn payment(
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self.connection_or_err().await?;
-        let context = crate::acquiring::commands::base::CommandContext::new(conn);
-        let command = PaymentCommand::new(amount, currency);
-        command.execute(context).await
+    ) -> Result<TerminalResponse> {
+        self.adapter.payment(amount, currency).await
     }
 
-    pub async fn totals(&mut self) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self.connection_or_err().await?;
-        let context = crate::acquiring::commands::base::CommandContext::new(conn);
-        let command = TotalsCommand::new();
-        command.execute(context).await
+    pub async fn totals(&mut self) -> Result<TerminalResponse> {
+        self.adapter.totals().await
     }
 
     pub async fn refund(
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<TerminalResponse, Box<dyn std::error::Error>> {
-        let conn = self.connection_or_err().await?;
-        let context = crate::acquiring::commands::base::CommandContext::new(conn);
-        let command = RefundCommand::new(amount, currency);
-        command.execute(context).await
+    ) -> Result<TerminalResponse> {
+        self.adapter.refund(amount, currency).await
     }
 
-    pub fn connected(&self) -> bool {
-        if let Some(conn) = &self.connection {
-            // We can't easily check without blocking, so we'll use a try_lock
-            if let Ok(conn_guard) = conn.try_lock() {
-                return conn_guard.is_connected();
-            }
-        }
-        false
+    pub async fn connected(&self) -> bool {
+        self.adapter.connected().await
     }
 }
