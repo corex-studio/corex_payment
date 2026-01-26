@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +72,46 @@ pub struct NormalizedTransactionData {
     #[serde(flatten)]
     pub raw: std::collections::HashMap<String, String>,
     pub extras: Option<std::collections::HashMap<String, String>>,
+}
+
+impl NormalizedTransactionData {
+    pub fn empty() -> Self {
+        Self {
+            message_id: None,
+            operation_code: None,
+            ecr_number: None,
+            response_code: None,
+            approve: None,
+            status: None,
+            status_text: None,
+            amount: None,
+            additional_amount: None,
+            currency: None,
+            pan_masked: None,
+            rrn: None,
+            invoice_number: None,
+            authorization_code: None,
+            terminal_id: None,
+            merchant_id: None,
+            batch_number: None,
+            date: None,
+            time: None,
+            timestamp: None,
+            host_timestamp: None,
+            card_entry_mode: None,
+            cardholder_verification: None,
+            text_response: None,
+            receipt: None,
+            application_label: None,
+            issuer_name: None,
+            transaction_id: None,
+            cashier_request: None,
+            cashier_response: None,
+            provider_code: None,
+            raw: HashMap::new(),
+            extras: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

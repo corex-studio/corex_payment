@@ -8,7 +8,8 @@ use std::{
 use async_trait::async_trait;
 
 use crate::{
-    ConnectionConfig, ConnectionType, TerminalResponse, acquiring::protocol::base::Acquiring,
+    ConnectionConfig, ConnectionType, TerminalResponse,
+    acquiring::{protocol::base::Acquiring, types::NormalizedTransactionData},
 };
 
 pub struct SBAdapter {
@@ -19,6 +20,16 @@ pub struct SBAdapter {
 impl SBAdapter {
     pub fn new(config: ConnectionConfig, dir: PathBuf) -> Self {
         Self { config, dir }
+    }
+
+    pub fn read_e(&self) -> Result<Vec<String>> {
+        let e_data = self.dir.join("e");
+        if !e_data.exists() {
+            return Err(anyhow!("Missing e file"));
+        }
+
+        let bytes = fs::read(e_data)?;
+        Ok(extract_strings(&bytes))
     }
 
     fn get_pilot(&self) -> Result<PathBuf> {
@@ -153,10 +164,16 @@ impl Acquiring for SBAdapter {
         let success = res.status.success();
         let code = res.status.code().map(|v| v.to_string());
 
+        let e_strings = self.read_e();
+        let data = match e_strings {
+            Ok(_) => Some(NormalizedTransactionData::empty()),
+            Err(_) => None,
+        };
+
         Ok(TerminalResponse {
             success,
             code,
-            data: None,
+            data,
             message: None,
             error: None,
         })
