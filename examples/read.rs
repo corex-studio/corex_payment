@@ -15,6 +15,7 @@ fn main() {
         dc_host: None,
         ncom: Some("COM6".to_string()),
         baudrate: Some(115_600),
+        sc552_path: None,
     };
     let sc552 = PathBuf::from_str("libs/sc552/").unwrap_or_else(|_| {
         let mut p = PathBuf::new();

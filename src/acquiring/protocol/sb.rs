@@ -135,18 +135,18 @@ impl Acquiring for SBAdapter {
     }
 
     async fn connect(&mut self) -> Result<bool> {
-        dbg!(self.get_cmd()?);
+        self.get_cmd()?;
 
-        let pinpad_ini = dbg!(self.get_pinpad_ini()?);
+        let pinpad_ini = self.get_pinpad_ini()?;
         let mut ini_editor = IniEditor::load(&pinpad_ini)?;
 
         match &self.config.connection_type {
             ConnectionType::Usb => {
-                let edits = dbg!(self.configure_usb()?);
+                let edits = self.configure_usb()?;
                 ini_editor.edit_many(edits);
             }
             ConnectionType::Tcp => {
-                let edits = dbg!(self.configure_tcp()?);
+                let edits = self.configure_tcp()?;
                 ini_editor.edit_many(edits);
             }
             _ => return Err(anyhow!("Not yet implemented")),

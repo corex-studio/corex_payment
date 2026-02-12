@@ -12,6 +12,7 @@ async fn main() {
         address: None,
         port: None,
         timeout: Some(10000),
+        sc552_path: None,
     });
 
     let con = term.connect().await;
