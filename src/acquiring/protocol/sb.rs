@@ -1,7 +1,11 @@
 use anyhow::{Result, anyhow};
 use serde::Serialize;
 use std::{
-    fmt::Display, fs, path::{Path, PathBuf}, pin, process::Command
+    fmt::Display,
+    fs,
+    path::{Path, PathBuf},
+    pin,
+    process::Command,
 };
 
 use async_trait::async_trait;
@@ -15,11 +19,16 @@ use crate::{
 pub struct SBAdapter {
     config: ConnectionConfig,
     dir: PathBuf,
+    is_connected: bool,
 }
 
 impl SBAdapter {
     pub fn new(config: ConnectionConfig, dir: PathBuf) -> Self {
-        Self { config, dir }
+        Self {
+            config,
+            dir,
+            is_connected: false,
+        }
     }
 
     pub fn read_e(&self) -> Result<SbPilotE> {
@@ -128,14 +137,13 @@ impl SBAdapter {
 #[async_trait]
 impl Acquiring for SBAdapter {
     async fn connected(&self) -> bool {
-        self.get_cmd().is_ok()
+        self.is_connected
     }
 
     async fn connect(&mut self) -> Result<bool> {
         self.get_cmd()?;
 
         let pinpad_ini = self.get_pinpad_ini()?;
-        println!("sc552 path: {:?}", pinpad_ini);
         let mut ini_editor = IniEditor::load(&pinpad_ini)?;
 
         match &self.config.connection_type {
@@ -151,10 +159,13 @@ impl Acquiring for SBAdapter {
         };
         ini_editor.save(pinpad_ini)?;
 
+        self.is_connected = true;
+
         Ok(true)
     }
 
     async fn disconnect(&mut self) -> Result<()> {
+        self.is_connected = false;
         Ok(())
     }
 
