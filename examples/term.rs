@@ -12,9 +12,10 @@ async fn main() {
         port: None,
         timeout: Some(30000),
         dc_host: None,
-        ncom: Some("COM11".to_string()),
+        ncom: Some("COM19".to_string()),
         baudrate: Some(9_600),
-        sc552_path: None,
+        sc552_path: Some("C:\\Users\\Kaleria\\Downloads\\sc552\\sc552\\WinCLI".to_string()),
+        // sc552_path: None,
     });
 
     // let mut term = Terminal::new(ConnectionConfig {

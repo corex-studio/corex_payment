@@ -1,10 +1,7 @@
 use anyhow::{Result, anyhow};
 use serde::Serialize;
 use std::{
-    fmt::Display,
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
+    fmt::Display, fs, path::{Path, PathBuf}, pin, process::Command
 };
 
 use async_trait::async_trait;
@@ -138,6 +135,7 @@ impl Acquiring for SBAdapter {
         self.get_cmd()?;
 
         let pinpad_ini = self.get_pinpad_ini()?;
+        println!("sc552 path: {:?}", pinpad_ini);
         let mut ini_editor = IniEditor::load(&pinpad_ini)?;
 
         match &self.config.connection_type {
@@ -224,6 +222,7 @@ pub enum IniEdit {
     CommentOut { key: String },
 }
 
+#[derive(Debug)]
 pub struct IniEditor {
     lines: Vec<String>,
 }
