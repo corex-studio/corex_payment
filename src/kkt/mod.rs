@@ -220,6 +220,12 @@ impl Kkt {
         self.send("close_shift", "POST", Some(&data)).await
     }
 
+    pub async fn shift_status(
+        &self,
+    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+        self.send("shift_status", "GET", None).await
+    }
+
     pub async fn payment(
         &self,
         sell_task: &types::SellTask,

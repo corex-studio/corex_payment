@@ -5,9 +5,9 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() {
     let config = KktConfig {
-        connection_type: KktConnectionType::Usb,
-        address: Some(String::from("asdf")),
-        port: Some(123),
+        connection_type: KktConnectionType::Com,
+        address: None,
+        port: None,
     };
 
     let mut fiscal = Kkt::new(config);
@@ -20,12 +20,12 @@ async fn main() {
     thread::sleep(Duration::from_secs(3));
     println!("Slept");
 
-    let operator = Operator {
-        name: "Степан".to_string(),
-        vatin: None,
-    };
+    // let operator = Operator {
+    //     name: "Степан".to_string(),
+    //     vatin: None,
+    // };
 
-    let response = fiscal.open_shift(&operator).await;
+    let response = fiscal.shift_status().await;
     match response {
         Ok(v) => println!("Successful: {v:?}"),
         Err(e) => println!("Error: {e:?}"),
