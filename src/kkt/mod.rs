@@ -8,9 +8,6 @@ use std::process::{Child, Command, Stdio};
 use std::str::FromStr;
 use tokio::process::Command as TokioCommand;
 
-// #[cfg(target_os = "windows")]
-// const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 pub struct Kkt {
     config: KktConfig,
     server_process: Option<Child>,
@@ -19,7 +16,7 @@ pub struct Kkt {
 impl Kkt {
     pub fn new(config: types::KktConfig) -> Self {
         Self {
-            config: config,
+            config,
             server_process: None,
         }
     }
@@ -127,7 +124,7 @@ impl Kkt {
         let mut cmd = Command::new(bin_path);
         cmd.args(["--type", self.config.connection_type.raw()]);
         if let Some(v) = &self.config.address {
-            cmd.args(["--address", &v]);
+            cmd.args(["--address", v]);
         };
         if let Some(v) = &self.config.port {
             cmd.args(["--port", &v.to_string()]);
