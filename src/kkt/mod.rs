@@ -2,6 +2,7 @@ pub mod types;
 
 pub use types::*;
 
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -145,17 +146,17 @@ impl Kkt {
         action: &str,
         method: &str,
         data: Option<&serde_json::Value>,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    ) -> Result<serde_json::Value> {
         let url = self.make_url(action);
         let client = reqwest::Client::new();
 
         let response = if method == "GET" {
             let mut req = client.get(&url);
-            if let Some(data) = data {
-                if let Some(obj) = data.as_object() {
-                    for (key, value) in obj {
-                        req = req.query(&[(key, value)]);
-                    }
+            if let Some(data) = data
+                && let Some(obj) = data.as_object()
+            {
+                for (key, value) in obj {
+                    req = req.query(&[(key, value)]);
                 }
             }
             req.send().await?
@@ -169,31 +170,37 @@ impl Kkt {
 
         let status = response.status();
         if status.is_client_error() || status.is_server_error() {
-            let error_data = response
-                .json::<HashMap<String, serde_json::Value>>()
-                .await?;
+            let error_data = response.json::<serde_json::Value>().await?;
             return Ok(error_data);
         }
 
-        let data = response
-            .json::<HashMap<String, serde_json::Value>>()
-            .await?;
-        Ok(data)
+        let raw_bytes = response.bytes().await;
+
+        match raw_bytes {
+            Ok(b) => match serde_json::from_slice(&b) {
+                Ok(d) => Ok(d),
+                Err(e) => {
+                    let s = String::from_utf8(b.to_vec())?;
+                    Err(anyhow!(
+                        "Could not parse response. Error: {}. Raw data: {}",
+                        e,
+                        s
+                    ))
+                }
+            },
+            Err(e) => Err(anyhow!("Cannot read response. {:?}", e)),
+        }
     }
 
-    pub async fn connect(
-        &self,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn connect(&self) -> Result<serde_json::Value> {
         self.send("connect", "POST", None).await
     }
 
-    pub async fn disconnect(
-        &self,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn disconnect(&self) -> Result<serde_json::Value> {
         self.send("disconnect", "POST", None).await
     }
 
-    pub async fn check_connection(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn check_connection(&self) -> Result<bool> {
         let response = self.send("check", "GET", None).await;
         match response {
             Ok(v) => Ok(match &v["connected"] {
@@ -204,55 +211,36 @@ impl Kkt {
         }
     }
 
-    pub async fn open_shift(
-        &self,
-        operator: &types::Operator,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn open_shift(&self, operator: &types::Operator) -> Result<serde_json::Value> {
         let data = serde_json::json!({ "operator": operator });
         self.send("open_shift", "POST", Some(&data)).await
     }
 
-    pub async fn close_shift(
-        &self,
-        operator: &types::Operator,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn close_shift(&self, operator: &types::Operator) -> Result<serde_json::Value> {
         let data = serde_json::json!({ "operator": operator });
         self.send("close_shift", "POST", Some(&data)).await
     }
 
-    pub async fn shift_status(
-        &self,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn shift_status(&self) -> Result<serde_json::Value> {
         self.send("shift_status", "GET", None).await
     }
 
-    pub async fn payment(
-        &self,
-        sell_task: &types::SellTask,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn payment(&self, sell_task: &types::SellTask) -> Result<serde_json::Value> {
         let data = serde_json::to_value(sell_task)?;
         self.send("payment", "POST", Some(&data)).await
     }
 
-    pub async fn refund(
-        &self,
-        sell_task: &types::SellTask,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn refund(&self, sell_task: &types::SellTask) -> Result<serde_json::Value> {
         let data = serde_json::to_value(sell_task)?;
         self.send("refund", "POST", Some(&data)).await
     }
 
-    pub async fn document(
-        &self,
-        id: u32,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn document(&self, id: u32) -> Result<serde_json::Value> {
         let data = serde_json::json!({ "number": id });
         self.send("document", "GET", Some(&data)).await
     }
 
-    pub async fn info(
-        &self,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    pub async fn info(&self) -> Result<serde_json::Value> {
         self.send("info", "GET", None).await
     }
 }
