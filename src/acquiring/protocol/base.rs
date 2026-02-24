@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::TerminalResponse;
+use crate::{TerminalResponse, healthcheck::HealthcheckResult};
 
 #[async_trait]
 pub trait Acquiring: Send + Sync {
@@ -16,4 +16,6 @@ pub trait Acquiring: Send + Sync {
     async fn totals(&mut self) -> Result<TerminalResponse>;
 
     async fn refund(&mut self, amount: u64, currency: Option<String>) -> Result<TerminalResponse>;
+
+    async fn healthcheck(&self) -> HealthcheckResult;
 }

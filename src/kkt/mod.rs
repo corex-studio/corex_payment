@@ -9,9 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::str::FromStr;
 use tokio::process::Command as TokioCommand;
 
-use crate::healthcheck::HealthcheckResult;
-use crate::kkt::healthcheck::healthcheck;
-use crate::utils::check_port::is_device_connected;
+use crate::healthcheck::{HealthcheckResult, Healthchecker};
 
 pub struct Kkt {
     config: KktConfig,
@@ -250,6 +248,6 @@ impl Kkt {
     }
 
     pub async fn healthcheck(&self) -> HealthcheckResult {
-        healthcheck(self.config.clone()).await
+        self.run_healthcheck().await
     }
 }

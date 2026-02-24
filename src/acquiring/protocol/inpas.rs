@@ -2,6 +2,7 @@ use crate::ConnectionType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::response::build_terminal_response_from_raw;
 use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
+use crate::healthcheck::HealthcheckResult;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use quick_xml::Writer;
@@ -373,6 +374,10 @@ impl Acquiring for InpasAdapter {
         }]);
 
         self.send_inpas_request(&fields).await
+    }
+
+    async fn healthcheck(&self) -> HealthcheckResult {
+        HealthcheckResult::success()
     }
 }
 

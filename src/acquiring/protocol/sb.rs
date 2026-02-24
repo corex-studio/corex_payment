@@ -4,7 +4,6 @@ use std::{
     fmt::Display,
     fs,
     path::{Path, PathBuf},
-    pin,
     process::Command,
 };
 
@@ -14,11 +13,12 @@ use encoding_rs::WINDOWS_1251;
 use crate::{
     ConnectionConfig, ConnectionType, TerminalResponse,
     acquiring::{protocol::base::Acquiring, types::NormalizedTransactionData},
+    healthcheck::{HealthcheckResult, Healthchecker},
 };
 
 pub struct SBAdapter {
-    config: ConnectionConfig,
-    dir: PathBuf,
+    pub config: ConnectionConfig,
+    pub dir: PathBuf,
     is_connected: bool,
 }
 
@@ -42,7 +42,7 @@ impl SBAdapter {
         // Ok(extract_strings(&bytes))
     }
 
-    fn get_pilot(&self) -> Result<PathBuf> {
+    pub fn get_pilot(&self) -> Result<PathBuf> {
         let sb_pilot = self.dir.join("sb_pilot.exe");
 
         match sb_pilot.exists() {
@@ -51,7 +51,7 @@ impl SBAdapter {
         }
     }
 
-    fn get_pinpad_ini(&self) -> Result<PathBuf> {
+    pub fn get_pinpad_ini(&self) -> Result<PathBuf> {
         let pinpad_ini = self.dir.join("pinpad.ini");
 
         match pinpad_ini.exists() {
@@ -225,6 +225,10 @@ impl Acquiring for SBAdapter {
             error: None,
         })
     }
+
+    async fn healthcheck(&self) -> HealthcheckResult {
+        self.run_healthcheck().await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -318,23 +322,23 @@ impl IniEditor {
     }
 }
 
-fn extract_strings(data: &[u8]) -> Vec<String> {
-    let mut strings = Vec::new();
-    let mut buf = Vec::new();
-
-    for &b in data {
-        if (0x20..=0x7E).contains(&b) {
-            buf.push(b);
-        } else {
-            if buf.len() >= 3 {
-                strings.push(String::from_utf8_lossy(&buf).to_string());
-            }
-            buf.clear();
-        }
-    }
-
-    strings
-}
+// fn extract_strings(data: &[u8]) -> Vec<String> {
+//     let mut strings = Vec::new();
+//     let mut buf = Vec::new();
+//
+//     for &b in data {
+//         if (0x20..=0x7E).contains(&b) {
+//             buf.push(b);
+//         } else {
+//             if buf.len() >= 3 {
+//                 strings.push(String::from_utf8_lossy(&buf).to_string());
+//             }
+//             buf.clear();
+//         }
+//     }
+//
+//     strings
+// }
 
 fn keep_only_digits(s: String) -> String {
     // Итератор по char + filter + collect в новый String

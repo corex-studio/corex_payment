@@ -1,5 +1,41 @@
 use anyhow::Error;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+#[async_trait]
+pub trait Healthchecker {
+    async fn run_healthcheck(&self) -> HealthcheckResult {
+        let port_connected = self.check_port().await;
+        let drivers_ready = self.check_drivers();
+
+        let success = port_connected.is_success() && drivers_ready.is_success();
+        if success {
+            return HealthcheckResult::success();
+        }
+
+        let mut message: String = String::new();
+        let mut details: Vec<String> = Vec::new();
+
+        if let CheckUnit::Error(m, e) = port_connected {
+            message = format!("{}\n", m);
+            if let Some(err) = e {
+                details.push(format!("{}", err));
+            }
+        }
+        if let CheckUnit::Error(m, e) = drivers_ready {
+            message = format!("{}\n", m);
+            if let Some(err) = e {
+                details.push(format!("{}", err));
+            }
+        }
+
+        HealthcheckResult::error(message, details)
+    }
+
+    async fn check_port(&self) -> CheckUnit;
+
+    fn check_drivers(&self) -> CheckUnit;
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthcheckResult {

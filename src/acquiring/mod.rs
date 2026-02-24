@@ -1,3 +1,4 @@
+mod healthcheck;
 pub mod protocol;
 pub mod response;
 pub mod terminal;
