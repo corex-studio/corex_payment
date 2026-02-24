@@ -4,15 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProtocolType {
+    #[default]
     Ttk,
     Inpas,
-}
-
-impl Default for ProtocolType {
-    fn default() -> Self {
-        Self::Ttk
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,11 +25,11 @@ pub struct ConnectionConfig {
     pub protocol: ProtocolType,
     pub serial_number: String,
     pub address: Option<String>,
-    pub port: Option<u16>,
+    pub port: Option<u32>,
     pub timeout: Option<u32>,
     pub dc_host: Option<String>,
-    pub ncom: Option<String>,
-    pub baudrate: Option<u32>,
+    // pub ncom: Option<String>,
+    // pub baudrate: Option<u32>,
     pub sc552_path: Option<String>,
 }
 

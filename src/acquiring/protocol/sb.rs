@@ -68,12 +68,12 @@ impl SBAdapter {
     }
 
     fn configure_usb(&self) -> Result<Vec<IniEdit>> {
-        let com = match &self.config.ncom {
+        let com = match &self.config.address {
             Some(v) => keep_only_digits(v.clone()),
             None => return Err(anyhow!("Param ncom is missing")),
         };
 
-        let baudrate = match self.config.baudrate {
+        let baudrate = match self.config.port {
             Some(v) => v.to_string(),
             None => "9600".to_string(),
         };

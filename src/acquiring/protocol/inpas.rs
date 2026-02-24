@@ -139,10 +139,10 @@ impl InpasAdapter {
                 envelope.ipaddr = Some(format!("{}:{}", address, port));
             }
             ConnectionType::Usb => {
-                let ncom = self.config.ncom.as_ref().ok_or(
+                let ncom = self.config.address.as_ref().ok_or(
                 anyhow!("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode"),
             )?;
-                let baudrate = self.config.baudrate.ok_or(
+                let baudrate = self.config.port.ok_or(
                 anyhow!("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode"),
             )?;
                 envelope.ncom = Some(ncom.clone());
