@@ -1,7 +1,8 @@
 pub mod acquiring;
+pub mod healthcheck;
 pub mod kkt;
+mod utils;
 
 pub use acquiring::{ConnectionConfig, ConnectionType, ProtocolType, Terminal, TerminalResponse};
-pub use kkt::{Kkt, KktConfig, ConnectionType as KktConnectionType};
-pub use kkt::types::{Operator, SellTask, Item, Payment, Tax, ClientInfo, TaxEntry};
-
+pub use kkt::types::{ClientInfo, Item, Operator, Payment, SellTask, Tax, TaxEntry};
+pub use kkt::{ConnectionType as KktConnectionType, Kkt, KktConfig};

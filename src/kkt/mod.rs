@@ -1,13 +1,17 @@
+mod healthcheck;
 pub mod types;
 
 pub use types::*;
 
 use anyhow::{Result, anyhow};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::str::FromStr;
 use tokio::process::Command as TokioCommand;
+
+use crate::healthcheck::HealthcheckResult;
+use crate::kkt::healthcheck::healthcheck;
+use crate::utils::check_port::is_device_connected;
 
 pub struct Kkt {
     config: KktConfig,
@@ -119,8 +123,9 @@ impl Kkt {
 
         #[allow(unused_mut)]
         let mut bin_path = PathBuf::from_str("./libs/kkt")?;
-        #[cfg(target_os = "windows")]
-        bin_path.set_extension("exe");
+        if cfg!(target_os = "windows") {
+            bin_path.set_extension("exe");
+        }
 
         let mut cmd = Command::new(bin_path);
         cmd.args(["--type", self.config.connection_type.raw()]);
@@ -242,5 +247,9 @@ impl Kkt {
 
     pub async fn info(&self) -> Result<serde_json::Value> {
         self.send("info", "GET", None).await
+    }
+
+    pub async fn healthcheck(&self) -> HealthcheckResult {
+        healthcheck(self.config.clone()).await
     }
 }
