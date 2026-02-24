@@ -2,6 +2,7 @@ use crate::ProtocolType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
 use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
+use crate::healthcheck::HealthcheckResult;
 use anyhow::Result;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -64,5 +65,9 @@ impl Terminal {
 
     pub async fn connected(&self) -> bool {
         self.adapter.connected().await
+    }
+
+    pub async fn healthcheck(&self) -> HealthcheckResult {
+        self.adapter.healthcheck().await
     }
 }
