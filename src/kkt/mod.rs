@@ -24,54 +24,54 @@ impl Kkt {
         }
     }
 
-    #[cfg(target_os = "macos")]
     pub async fn get_open_processes(&self) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
-        let output = TokioCommand::new("pgrep")
-            .arg("-f")
-            .arg("kkt")
-            .output()
-            .await?;
+        if cfg!(target_os = "macos") {
+            let output = TokioCommand::new("pgrep")
+                .arg("-f")
+                .arg("kkt")
+                .output()
+                .await?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let pids: Vec<u32> = stdout
-            .lines()
-            .filter_map(|line| line.trim().parse().ok())
-            .collect();
-        Ok(pids)
-    }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let pids: Vec<u32> = stdout
+                .lines()
+                .filter_map(|line| line.trim().parse().ok())
+                .collect();
+            Ok(pids)
+        } else if cfg!(target_os = "windows") {
+            let output = TokioCommand::new("wmic")
+                .args([
+                    "process",
+                    "where",
+                    "name='kkt.exe'",
+                    "get",
+                    "ProcessId",
+                    "/format:csv",
+                ])
+                .output()
+                .await?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let pids: Vec<u32> = stdout
+                .lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        return None;
+                    }
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 2 {
+                        parts[1].parse().ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-    #[cfg(target_os = "windows")]
-    pub async fn get_open_processes(&self) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
-        let output = TokioCommand::new("wmic")
-            .args([
-                "process",
-                "where",
-                "name='kkt.exe'",
-                "get",
-                "ProcessId",
-                "/format:csv",
-            ])
-            .output()
-            .await?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let pids: Vec<u32> = stdout
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let line = line.trim();
-                if line.is_empty() {
-                    return None;
-                }
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 2 {
-                    parts[1].parse().ok()
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        Ok(pids)
+            Ok(pids)
+        } else {
+            Ok(vec![])
+        }
     }
 
     pub async fn is_server_open(&self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -79,25 +79,6 @@ impl Kkt {
         Ok(!processes.is_empty())
     }
 
-    #[cfg(target_os = "macos")]
-    pub async fn stop_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let processes = match self.get_open_processes().await {
-            Ok(v) => v,
-            Err(_) => {
-                return Ok(());
-            }
-        };
-        for pid in processes {
-            let _ = TokioCommand::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .output()
-                .await;
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
     pub async fn stop_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let processes = match self.get_open_processes().await {
             Ok(v) => v,
@@ -106,11 +87,21 @@ impl Kkt {
             }
         };
 
-        for pid in processes {
-            let _ = TokioCommand::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .output()
-                .await;
+        if cfg!(target_os = "macos") {
+            for pid in processes {
+                let _ = TokioCommand::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .output()
+                    .await;
+            }
+        } else if cfg!(target_os = "windows") {
+            for pid in processes {
+                let _ = TokioCommand::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .output()
+                    .await;
+            }
         }
 
         Ok(())
