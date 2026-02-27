@@ -3,6 +3,7 @@ use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::response::build_terminal_response_from_raw;
 use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
 use crate::healthcheck::HealthcheckResult;
+use crate::{ProcessSuccess, ProcessError};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use quick_xml::Writer;
@@ -315,15 +316,15 @@ impl Acquiring for InpasAdapter {
         true
     }
 
-    async fn connect(&mut self) -> Result<bool> {
-        Ok(true)
+    async fn connect(&mut self) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
+        Ok(ProcessSuccess::new("CONNECT_SUCCESSFUL", true))
     }
 
-    async fn disconnect(&mut self) -> Result<()> {
-        Ok(())
+    async fn disconnect(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
+        Ok(ProcessSuccess::new("DISCONNECT_SUCCESSFUL", ()))
     }
 
-    async fn payment(&mut self, amount: u64, currency: Option<String>) -> Result<TerminalResponse> {
+    async fn payment(&mut self, amount: u64, currency: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         let mut fields = self.build_inpas_fields(vec![
             InpasField {
                 id: "00".to_string(),
@@ -343,9 +344,11 @@ impl Acquiring for InpasAdapter {
         }
 
         self.send_inpas_request(&fields).await
+            .map(|resp| ProcessSuccess::new("PAYMENT_SUCCESSFUL", resp))
+            .map_err(|e| ProcessError::new("PAYMENT_FAIL", "Не удалось провести оплату", e.to_string()))
     }
 
-    async fn refund(&mut self, amount: u64, currency: Option<String>) -> Result<TerminalResponse> {
+    async fn refund(&mut self, amount: u64, currency: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         let mut fields = self.build_inpas_fields(vec![
             InpasField {
                 id: "00".to_string(),
@@ -365,15 +368,19 @@ impl Acquiring for InpasAdapter {
         }
 
         self.send_inpas_request(&fields).await
+            .map(|resp| ProcessSuccess::new("REFUND_SUCCESSFUL", resp))
+            .map_err(|e| ProcessError::new("REFUND_FAIL", "Не удалось выполнить возврат", e.to_string()))
     }
 
-    async fn totals(&mut self) -> Result<TerminalResponse> {
+    async fn totals(&mut self) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         let fields = self.build_inpas_fields(vec![InpasField {
             id: "25".to_string(),
             value: "59".to_string(),
         }]);
 
         self.send_inpas_request(&fields).await
+            .map(|resp| ProcessSuccess::new("TOTALS_SUCCESSFUL", resp))
+            .map_err(|e| ProcessError::new("TOTALS_FAIL", "Не удалось выполнить сверку итогов", e.to_string()))
     }
 
     async fn healthcheck(&self) -> HealthcheckResult {

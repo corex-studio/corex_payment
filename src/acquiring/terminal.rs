@@ -3,9 +3,10 @@ use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
 use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
 use crate::healthcheck::HealthcheckResult;
-use anyhow::Result;
+use crate::{ProcessSuccess, ProcessError};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::result::Result;
 
 pub struct Terminal {
     adapter: Box<dyn Acquiring>,
@@ -35,11 +36,11 @@ impl Terminal {
         Self { adapter }
     }
 
-    pub async fn connect(&mut self) -> Result<bool> {
+    pub async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
         self.adapter.connect().await
     }
 
-    pub async fn disconnect(&mut self) -> Result<()> {
+    pub async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
         self.adapter.disconnect().await
     }
 
@@ -47,11 +48,11 @@ impl Terminal {
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<TerminalResponse> {
+    ) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         self.adapter.payment(amount, currency).await
     }
 
-    pub async fn totals(&mut self) -> Result<TerminalResponse> {
+    pub async fn totals(&mut self) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         self.adapter.totals().await
     }
 
@@ -59,7 +60,7 @@ impl Terminal {
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<TerminalResponse> {
+    ) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
         self.adapter.refund(amount, currency).await
     }
 
