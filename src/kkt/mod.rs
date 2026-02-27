@@ -108,7 +108,9 @@ impl Kkt {
     }
 
     pub async fn run_server(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.stop_server().await?;
+        if self.is_server_open().await? {
+            return Ok(());
+        }
 
         #[allow(unused_mut)]
         let mut bin_path = PathBuf::from_str("./libs/kkt")?;
