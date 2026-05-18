@@ -22,6 +22,7 @@ pub struct ProcessError {
     pub code: String,
     pub message: String,
     pub details: String,
+    pub input_data: Option<String>,
 }
 
 impl ProcessError {
@@ -34,30 +35,52 @@ impl ProcessError {
             code: code.into(),
             message: message.into(),
             details: details.into(),
+            input_data: None,
+        }
+    }
+
+    pub fn new_with_input(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: impl Into<String>,
+        input_data: Option<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            details: details.into(),
+            input_data,
         }
     }
 
     pub fn from_kkt_value(value: Value) -> Self {
-        let message = match value.get("error") {
-            Some(v) => match v {
-                Value::String(m) => m.clone(),
-                _ => "No error message".to_string(),
-            },
+        let details = match value.get("error") {
+            Some(v) => {
+                if let Value::String(m) = v {
+                    m.clone()
+                } else {
+                    "No error message".to_string()
+                }
+            }
             None => "No error message".to_string(),
         };
 
-        let details = match value.get("input") {
-            Some(v) => match v {
-                Value::String(m) => m.clone(),
-                _ => "".to_string(),
-            },
-            None => "".to_string(),
+        let input_data = match value.get("input") {
+            Some(v) => {
+                if let Value::String(m) = v {
+                    Some(m.clone())
+                } else {
+                    None
+                }
+            }
+            None => None,
         };
 
         Self {
             code: "KKT_REQUEST_FAILURE".to_string(),
-            message,
+            message: "Ошибка при выполнении запроса к ККТ".to_string(),
             details,
+            input_data,
         }
     }
 }
@@ -76,6 +99,7 @@ impl From<anyhow::Error> for ProcessError {
             code: "INTERNAL_ERROR".to_string(),
             message: "Произошла внутренняя ошибка".to_string(),
             details: err.to_string(),
+            input_data: None,
         }
     }
 }
@@ -86,6 +110,7 @@ impl From<reqwest::Error> for ProcessError {
             code: "NETWORK_ERROR".to_string(),
             message: "Ошибка сети при выполнении запроса".to_string(),
             details: err.to_string(),
+            input_data: None,
         }
     }
 }
@@ -96,6 +121,7 @@ impl From<std::io::Error> for ProcessError {
             code: "IO_ERROR".to_string(),
             message: "Ошибка ввода-вывода".to_string(),
             details: err.to_string(),
+            input_data: None,
         }
     }
 }
@@ -106,6 +132,7 @@ impl From<Box<dyn std::error::Error>> for ProcessError {
             code: "UNKNOWN_ERROR".to_string(),
             message: "Неизвестная ошибка".to_string(),
             details: err.to_string(),
+            input_data: None,
         }
     }
 }

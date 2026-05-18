@@ -42,24 +42,23 @@ impl Kkt {
         }
 
         let raw_bytes = response.bytes().await;
+        let raw_input = data.map(|v| v.to_string());
 
         match raw_bytes {
             Ok(b) => match serde_json::from_slice(&b) {
                 Ok(d) => Ok(d),
-                Err(e) => {
-                    Err(ProcessError::new(
-                        "KKT_RESPONSE_PARSING_ERROR",
-                        "Не удалось обработать ответ от ККТ",
-                        e.to_string(),
-                    ))
-                    // let s = String::from_utf8(b.to_vec());
-                    // Err()
-                }
+                Err(e) => Err(ProcessError::new_with_input(
+                    "KKT_RESPONSE_PARSING_ERROR",
+                    "Не удалось обработать ответ от ККТ",
+                    e.to_string(),
+                    raw_input,
+                )),
             },
-            Err(e) => Err(ProcessError::new(
+            Err(e) => Err(ProcessError::new_with_input(
                 "KKT_RESPONSE_BYTES_ERROR",
                 "Не удалось прочитать ответ от ККТ",
                 e.to_string(),
+                raw_input,
             )),
         }
     }
