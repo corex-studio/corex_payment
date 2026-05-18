@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,15 +36,35 @@ impl ProcessError {
             details: details.into(),
         }
     }
+
+    pub fn from_kkt_value(value: Value) -> Self {
+        let message = match value.get("error") {
+            Some(v) => match v {
+                Value::String(m) => m.clone(),
+                _ => "No error message".to_string(),
+            },
+            None => "No error message".to_string(),
+        };
+
+        let details = match value.get("input") {
+            Some(v) => match v {
+                Value::String(m) => m.clone(),
+                _ => "".to_string(),
+            },
+            None => "".to_string(),
+        };
+
+        Self {
+            code: "KKT_REQUEST_FAILURE".to_string(),
+            message,
+            details,
+        }
+    }
 }
 
 impl fmt::Display for ProcessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}] {} ({})",
-            self.code, self.message, self.details
-        )
+        write!(f, "[{}] {} ({})", self.code, self.message, self.details)
     }
 }
 
