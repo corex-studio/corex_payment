@@ -38,13 +38,6 @@ impl SBAdapter {
 
     pub fn read_e(&self) -> Result<SbPilotE> {
         parse_sb_pilot_e(self.dir.join("e"))
-        // let e_data = self.dir.join("e");
-        // if !e_data.exists() {
-        //     return Err(anyhow!("Missing e file"));
-        // }
-        //
-        // let bytes = fs::read(e_data)?;
-        // Ok(extract_strings(&bytes))
     }
 
     pub fn get_pilot(&self) -> Result<PathBuf> {
@@ -218,12 +211,9 @@ impl Acquiring for SBAdapter {
         let mut cmd = self.get_cmd()?;
         cmd.args(["1", &format!("{}", amount)]);
 
-        let res = cmd.output().map_err(|e| {
-            ProcessError::new(
-                "Failed to run payment command",
-                Value::String(e.to_string()),
-            )
-        })?;
+        let res = cmd
+            .output()
+            .map_err(|e| ProcessError::from_error("Failed to run payment command", e))?;
         let success = res.status.success();
 
         if !success {
@@ -253,9 +243,9 @@ impl Acquiring for SBAdapter {
         let mut cmd = self.get_cmd()?;
         cmd.args(["3", &format!("{}", amount)]);
 
-        let res = cmd.output().map_err(|e| {
-            ProcessError::new("Failed to run refund command", Value::String(e.to_string()))
-        })?;
+        let res = cmd
+            .output()
+            .map_err(|e| ProcessError::from_error("Failed to run refund command", e))?;
         let success = res.status.success();
 
         if !success {
@@ -283,9 +273,9 @@ impl Acquiring for SBAdapter {
         let mut cmd = self.get_cmd()?;
         cmd.arg("7");
 
-        let res = cmd.output().map_err(|e| {
-            ProcessError::new("Failed to run totals command", Value::String(e.to_string()))
-        })?;
+        let res = cmd
+            .output()
+            .map_err(|e| ProcessError::from_error("Failed to run totals command", e))?;
         let success = res.status.success();
 
         if !success {
@@ -399,26 +389,7 @@ impl IniEditor {
     }
 }
 
-// fn extract_strings(data: &[u8]) -> Vec<String> {
-//     let mut strings = Vec::new();
-//     let mut buf = Vec::new();
-//
-//     for &b in data {
-//         if (0x20..=0x7E).contains(&b) {
-//             buf.push(b);
-//         } else {
-//             if buf.len() >= 3 {
-//                 strings.push(String::from_utf8_lossy(&buf).to_string());
-//             }
-//             buf.clear();
-//         }
-//     }
-//
-//     strings
-// }
-
 fn keep_only_digits(s: String) -> String {
-    // Итератор по char + filter + collect в новый String
     s.chars().filter(|c| c.is_numeric()).collect()
 }
 

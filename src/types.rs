@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,9 @@ impl ProcessError {
     pub fn new(message: impl Into<String>, raw_data: Value) -> Self {
         Self {
             message: message.into(),
-            raw_data,
+            raw_data: json!({
+                "error": raw_data,
+            }),
             input_data: None,
         }
     }
@@ -42,7 +44,33 @@ impl ProcessError {
     ) -> Self {
         Self {
             message: message.into(),
-            raw_data,
+            raw_data: json!({
+                "error": raw_data,
+            }),
+            input_data,
+        }
+    }
+
+    pub fn from_error(message: impl Into<String>, error: impl std::error::Error) -> Self {
+        Self {
+            message: message.into(),
+            raw_data: json!({
+                "error": error.to_string(),
+            }),
+            input_data: None,
+        }
+    }
+
+    pub fn from_error_with_input(
+        message: impl Into<String>,
+        error: impl std::error::Error,
+        input_data: Option<String>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            raw_data: json!({
+                "error": error.to_string(),
+            }),
             input_data,
         }
     }

@@ -206,10 +206,7 @@ impl InpasAdapter {
 
         loop {
             let read_event = reader.read_event_into(&mut buf).map_err(|e| {
-                ProcessError::new(
-                    "Could not read XML response from Inpas".to_string(),
-                    Value::String(e.to_string()),
-                )
+                ProcessError::from_error("Could not read XML response from Inpas".to_string(), e)
             })?;
 
             match read_event {
@@ -220,10 +217,7 @@ impl InpasAdapter {
 
                         for attr in e.attributes() {
                             let attr = attr.map_err(|e| {
-                                ProcessError::new(
-                                    "Could not read XML attr".to_string(),
-                                    Value::String(e.to_string()),
-                                )
+                                ProcessError::from_error("Could not read XML attr".to_string(), e)
                             })?;
                             if attr.key.as_ref() == b"id" {
                                 id = Some(String::from_utf8_lossy(&attr.value).to_string());
@@ -234,9 +228,9 @@ impl InpasAdapter {
                         loop {
                             let read_event_node =
                                 reader.read_event_into(&mut text_buf).map_err(|e| {
-                                    ProcessError::new(
+                                    ProcessError::from_error(
                                         "Could not read XML node data".to_string(),
-                                        Value::String(e.to_string()),
+                                        e,
                                     )
                                 })?;
 
@@ -258,9 +252,9 @@ impl InpasAdapter {
                         loop {
                             let read_event_node =
                                 reader.read_event_into(&mut text_buf).map_err(|e| {
-                                    ProcessError::new(
+                                    ProcessError::from_error(
                                         "Could not read XML node data".to_string(),
-                                        Value::String(e.to_string()),
+                                        e,
                                     )
                                 })?;
 
@@ -279,9 +273,9 @@ impl InpasAdapter {
                         loop {
                             let read_event_node =
                                 reader.read_event_into(&mut text_buf).map_err(|e| {
-                                    ProcessError::new(
+                                    ProcessError::from_error(
                                         "Could not read XML node data".to_string(),
-                                        Value::String(e.to_string()),
+                                        e,
                                     )
                                 })?;
 
@@ -330,10 +324,16 @@ impl InpasAdapter {
                 .unwrap_or_else(|_| s.to_string())
         }
         if let Some(v) = data.get(inpas_prop_codes::DATETIME_HOST) {
-            data.insert(inpas_prop_codes::DATETIME_HOST.to_string(), parse_datetime(v));
+            data.insert(
+                inpas_prop_codes::DATETIME_HOST.to_string(),
+                parse_datetime(v),
+            );
         }
         if let Some(v) = data.get(inpas_prop_codes::TERMINAL_DATETIME) {
-            data.insert(inpas_prop_codes::TERMINAL_DATETIME.to_string(), parse_datetime(v));
+            data.insert(
+                inpas_prop_codes::TERMINAL_DATETIME.to_string(),
+                parse_datetime(v),
+            );
         }
 
         let normalized_data = normalize_terminal_response(crate::ProtocolType::Inpas, &data);
@@ -372,9 +372,10 @@ impl InpasAdapter {
 
         if status.is_client_error() || status.is_server_error() {
             let text = String::from_utf8_lossy(&bytes);
-            return Err(ProcessError::new(
+            return Err(ProcessError::new_with_input(
                 format!("DualConnector HTTP error {}", status.as_u16()),
                 Value::String(text.to_string()),
+                Some(xml_body.to_string()),
             ));
         }
         let charset = extract_charset(content_type_header.as_deref());
@@ -396,10 +397,7 @@ impl InpasAdapter {
 
         match host_str.parse() {
             Ok(s) => Ok(s),
-            Err(e) => Err(ProcessError::new(
-                "Could not parse DC host url",
-                Value::String(e.to_string()),
-            )),
+            Err(e) => Err(ProcessError::from_error("Could not parse DC host url", e)),
         }
     }
 }

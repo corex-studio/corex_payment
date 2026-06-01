@@ -48,15 +48,15 @@ impl Kkt {
         match raw_bytes {
             Ok(b) => match serde_json::from_slice(&b) {
                 Ok(d) => Ok(d),
-                Err(e) => Err(ProcessError::new_with_input(
+                Err(e) => Err(ProcessError::from_error_with_input(
                     "Could not parse KKT response",
-                    Value::String(e.to_string()),
+                    e,
                     raw_input,
                 )),
             },
-            Err(e) => Err(ProcessError::new_with_input(
+            Err(e) => Err(ProcessError::from_error_with_input(
                 "Could not read KKT response",
-                Value::String(e.to_string()),
+                e,
                 raw_input,
             )),
         }
@@ -113,9 +113,9 @@ impl Kkt {
         sell_task: &types::SellTask,
     ) -> std::result::Result<ProcessSuccess<serde_json::Value>, ProcessError> {
         let data = serde_json::to_value(sell_task).map_err(|e| {
-            ProcessError::new_with_input(
+            ProcessError::from_error_with_input(
                 "Failed to parse input data into JSON value",
-                Value::String(e.to_string()),
+                e,
                 Some(format!("{:?}", sell_task)),
             )
         })?;
@@ -127,9 +127,9 @@ impl Kkt {
         sell_task: &types::SellTask,
     ) -> std::result::Result<ProcessSuccess<serde_json::Value>, ProcessError> {
         let data = serde_json::to_value(sell_task).map_err(|e| {
-            ProcessError::new_with_input(
+            ProcessError::from_error_with_input(
                 "Failed to parse input data into JSON value",
-                Value::String(e.to_string()),
+                e,
                 Some(format!("{:?}", sell_task)),
             )
         })?;
