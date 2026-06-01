@@ -7,8 +7,6 @@ async fn main() {
         serial_number: String::from("10285694"),
         connection_type: ConnectionType::Usb,
         dc_host: Some(String::from("192.168.39.176:9015")),
-        ncom: Some(String::from("COM15")),
-        baudrate: Some(9600),
         address: None,
         port: None,
         timeout: Some(10000),

@@ -1,6 +1,9 @@
 use std::{path::PathBuf, str::FromStr};
 
-use corex_payment::{ConnectionConfig, acquiring::protocol::SBAdapter};
+use corex_payment::{
+    ConnectionConfig, ProtocolType,
+    acquiring::{protocol::SBAdapter, response::normalize_terminal_response},
+};
 
 fn main() {
     let config = ConnectionConfig {
@@ -13,8 +16,6 @@ fn main() {
         port: None,
         timeout: Some(30000),
         dc_host: None,
-        ncom: Some("COM6".to_string()),
-        baudrate: Some(115_600),
         sc552_path: None,
     };
     let sc552 = PathBuf::from_str("libs/sc552/").unwrap_or_else(|_| {
@@ -25,5 +26,7 @@ fn main() {
     });
     let adapter = SBAdapter::new(config.clone(), sc552);
 
-    dbg!(adapter.read_e().unwrap());
+    let e_data = adapter.read_e().unwrap();
+    let norm_data = normalize_terminal_response(ProtocolType::Ttk, &e_data.as_hash_map());
+    dbg!(norm_data);
 }

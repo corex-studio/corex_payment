@@ -1,2 +1,4 @@
 target/
 libs/**
+.DS_Store
+examples/**
