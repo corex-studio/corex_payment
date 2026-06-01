@@ -1,5 +1,6 @@
 use super::Kkt;
 use super::types;
+use crate::kkt::ConnectionStatus;
 use crate::{ProcessError, ProcessSuccess};
 use anyhow::Result;
 use serde_json::Value;
@@ -76,12 +77,12 @@ impl Kkt {
 
     pub async fn check_connection(
         &self,
-    ) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         let response = self.send("check", "GET", None).await;
         let connected = response.is_ok();
         Ok(ProcessSuccess::new(
             "Connection status",
-            connected,
+            ConnectionStatus::new(connected),
             Value::Bool(connected),
         ))
     }

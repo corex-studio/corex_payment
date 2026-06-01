@@ -26,6 +26,17 @@ impl ConnectionType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionStatus {
+    pub is_connected: bool,
+}
+
+impl ConnectionStatus {
+    pub fn new(is_connected: bool) -> Self {
+        Self { is_connected }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SellTask {
     pub taxation_type: Option<String>,
     pub electronically: bool,

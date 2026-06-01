@@ -1,4 +1,5 @@
 use super::Kkt;
+use crate::kkt::ConnectionStatus;
 use crate::{ProcessError, ProcessSuccess};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -83,23 +84,27 @@ impl Kkt {
         }
     }
 
-    pub async fn is_server_open(&self) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
+    pub async fn is_server_open(
+        &self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         let processes = self.get_open_processes().await?.data;
         let is_open = !processes.is_empty();
         Ok(ProcessSuccess::new(
             "Successfully checked open processes",
-            is_open,
+            ConnectionStatus::new(is_open),
             Value::Bool(is_open),
         ))
     }
 
-    pub async fn stop_server(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
+    pub async fn stop_server(
+        &mut self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         let processes = match self.get_open_processes().await {
             Ok(v) => v.data,
             Err(_) => {
                 return Ok(ProcessSuccess::new(
                     "Server was not running. Nothing to stop",
-                    (),
+                    ConnectionStatus::new(false),
                     Value::Null,
                 ));
             }
@@ -127,16 +132,20 @@ impl Kkt {
 
         Ok(ProcessSuccess::new(
             "Server stopped successfully",
-            (),
-            json!(stopped_pids),
+            ConnectionStatus::new(false),
+            json!({
+                "stopped_pids": stopped_pids,
+            }),
         ))
     }
 
-    pub async fn run_server(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
-        if self.is_server_open().await?.data {
+    pub async fn run_server(
+        &mut self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
+        if self.is_server_open().await?.data.is_connected {
             return Ok(ProcessSuccess::new(
                 "Server is already running",
-                (),
+                ConnectionStatus::new(true),
                 Value::Null,
             ));
         }
@@ -172,7 +181,7 @@ impl Kkt {
 
         Ok(ProcessSuccess::new(
             "Server kkt.exe succesfully started",
-            (),
+            ConnectionStatus::new(true),
             Value::Null,
         ))
     }

@@ -7,7 +7,10 @@ pub use types::*;
 
 use std::process::Child;
 
-use crate::healthcheck::{HealthcheckResult, Healthchecker};
+use crate::{
+    ProcessError, ProcessSuccess,
+    healthcheck::{HealthcheckResult, Healthchecker},
+};
 
 pub struct Kkt {
     pub(crate) config: KktConfig,
@@ -22,7 +25,13 @@ impl Kkt {
         }
     }
 
-    pub async fn healthcheck(&self) -> HealthcheckResult {
-        self.run_healthcheck().await
+    pub async fn healthcheck(&self) -> Result<ProcessSuccess<HealthcheckResult>, ProcessError> {
+        let result = self.run_healthcheck().await;
+        let raw_result = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
+        Ok(ProcessSuccess::new(
+            "Healthcheck completed",
+            result,
+            raw_result,
+        ))
     }
 }
