@@ -10,26 +10,25 @@ pub fn normalize_terminal_response(
 ) -> NormalizedTransactionData {
     match protocol {
         ProtocolType::Inpas => normalize_inpas(raw),
-        ProtocolType::Ttk => normalize_ttk(raw),
+        ProtocolType::Ttk => normalize_sb(raw),
+        ProtocolType::Sb => normalize_sb(raw),
     }
 }
 
-fn normalize_ttk(raw: &HashMap<String, String>) -> NormalizedTransactionData {
+fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
     NormalizedTransactionData {
         raw: raw.clone(),
-        amount: raw
-            .get("Transaction Amount")
-            .map(|v| v.parse::<f64>().unwrap_or(0.0)),
-        status_name: raw.get("Status name").cloned(),
-        card_masked_pan: raw.get("PAN").cloned(),
-        invoice_number: raw.get("Invoice Number").cloned(),
-        authorization_code: raw.get("Authorization ID").cloned(),
-        terminal_id: raw.get("Terminal ID").cloned(),
-        merchant_id: raw.get("Merchant No").cloned(),
-        timestamp: build_ttk_timestamp(raw.get("Date"), raw.get("Time")),
-        issuer_name: raw.get("Issuer Name").cloned(),
+        amount: None,
+        status_name: raw.get("result_text").cloned(),
+        card_masked_pan: raw.get("masked_pan").cloned(),
+        invoice_number: None,
+        authorization_code: raw.get("auth_code").cloned(),
+        terminal_id: raw.get("terminal_id").cloned(),
+        merchant_id: raw.get("merchant_id").cloned(),
+        timestamp: raw.get("datetime").cloned(),
+        issuer_name: None,
         host_timestamp: None,
-        trx_id: raw.get("Transaction ID").cloned(),
+        trx_id: None,
     }
 }
 
@@ -49,12 +48,5 @@ fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         merchant_id: raw.get(inpas_prop_codes::MERCHANT_ID).cloned(),
         trx_id: raw.get(inpas_prop_codes::TRXID).cloned(),
         issuer_name: None,
-    }
-}
-
-fn build_ttk_timestamp(date: Option<&String>, time: Option<&String>) -> Option<String> {
-    match (date, time) {
-        (Some(d), Some(t)) => Some(format!("{}{}", d, t)),
-        _ => None,
     }
 }

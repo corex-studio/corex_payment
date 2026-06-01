@@ -427,7 +427,6 @@ pub struct SbPilotE {
     pub result_code: i32,
     pub result_text: String,
     pub masked_pan_or_phone: Option<String>,
-    pub terminal_serial: Option<String>,
     pub card_expiry: Option<String>,
     pub auth_code: Option<String>,
     pub operation_id: Option<String>,
@@ -437,34 +436,15 @@ pub struct SbPilotE {
     pub datetime: Option<String>,
     pub rrn: Option<String>,
     pub card_hash: Option<String>,
-    pub bonus_amount: Option<u64>,
     pub merchant_id: Option<String>,
-    pub monitoring_type: Option<String>,
-    pub monitoring_state: Option<String>,
-    pub monitoring_message: Option<String>,
-    pub loyalty_program: Option<u32>,
-    pub user_reply: Option<String>,
-    pub request_id: Option<String>,
-    pub flags: Option<u32>,
-    pub mifare_loyalty: Option<String>,
-    pub has_vas: Option<bool>,
-    pub hash_type: Option<String>,
-    pub extended_hash: Option<String>,
-    pub par: Option<String>,
-    pub card_type_id: Option<String>,
-    pub entry_mode: Option<String>,
-    pub sbp_url: Option<String>,
-    pub sbp_order_id: Option<String>,
-    pub vendor_terminal_serial: Option<String>,
 }
 
 impl SbPilotE {
     pub fn empty() -> Self {
         Self {
             result_code: -1,
-            result_text: "".to_string(),
+            result_text: String::new(),
             masked_pan_or_phone: None,
-            terminal_serial: None,
             card_expiry: None,
             auth_code: None,
             operation_id: None,
@@ -474,30 +454,47 @@ impl SbPilotE {
             datetime: None,
             rrn: None,
             card_hash: None,
-            bonus_amount: None,
             merchant_id: None,
-            monitoring_type: None,
-            monitoring_state: None,
-            monitoring_message: None,
-            loyalty_program: None,
-            user_reply: None,
-            request_id: None,
-            flags: None,
-            mifare_loyalty: None,
-            has_vas: None,
-            hash_type: None,
-            extended_hash: None,
-            par: None,
-            card_type_id: None,
-            entry_mode: None,
-            sbp_url: None,
-            sbp_order_id: None,
-            vendor_terminal_serial: None,
         }
     }
 
     pub fn as_hash_map(&self) -> HashMap<String, String> {
-        HashMap::new()
+        let mut m = HashMap::new();
+        m.insert("result_text".to_string(), self.result_text.clone());
+        if let Some(v) = &self.masked_pan_or_phone {
+            m.insert("masked_pan".to_string(), v.clone());
+        }
+        if let Some(v) = &self.card_expiry {
+            m.insert("card_expiry".to_string(), v.clone());
+        }
+        if let Some(v) = &self.auth_code {
+            m.insert("auth_code".to_string(), v.clone());
+        }
+        if let Some(v) = &self.operation_id {
+            m.insert("operation_id".to_string(), v.clone());
+        }
+        if let Some(v) = &self.card_type {
+            m.insert("card_type".to_string(), v.clone());
+        }
+        if let Some(v) = &self.is_sber_card {
+            m.insert("is_sber_card".to_string(), v.to_string());
+        }
+        if let Some(v) = &self.terminal_id {
+            m.insert("terminal_id".to_string(), v.clone());
+        }
+        if let Some(v) = &self.datetime {
+            m.insert("datetime".to_string(), v.clone());
+        }
+        if let Some(v) = &self.rrn {
+            m.insert("rrn".to_string(), v.clone());
+        }
+        if let Some(v) = &self.card_hash {
+            m.insert("card_hash".to_string(), v.clone());
+        }
+        if let Some(v) = &self.merchant_id {
+            m.insert("merchant_id".to_string(), v.clone());
+        }
+        m
     }
 }
 
@@ -511,9 +508,13 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
         .collect();
 
     // 1. Result code
-    let (code, text) = lines[0]
+    let (code, status_text) = lines[0]
         .split_once(',')
         .ok_or(anyhow!("Invalid result line"))?;
+    let result_text = match code {
+        "0" => "Успешно".to_string(),
+        _ => status_text.to_string(),
+    };
 
     let result_code: i32 = code.parse()?;
 
@@ -531,10 +532,9 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
 
     let mut e = SbPilotE {
         result_code,
-        result_text: text.to_string(),
+        result_text,
 
         masked_pan_or_phone: None,
-        terminal_serial: None,
         card_expiry: None,
         auth_code: None,
         operation_id: None,
@@ -544,25 +544,7 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
         datetime: None,
         rrn: None,
         card_hash: None,
-        bonus_amount: None,
         merchant_id: None,
-        monitoring_type: None,
-        monitoring_state: None,
-        monitoring_message: None,
-        loyalty_program: None,
-        user_reply: None,
-        request_id: None,
-        flags: None,
-        mifare_loyalty: None,
-        has_vas: None,
-        hash_type: None,
-        extended_hash: None,
-        par: None,
-        card_type_id: None,
-        entry_mode: None,
-        sbp_url: None,
-        sbp_order_id: None,
-        vendor_terminal_serial: None,
     };
 
     if result_code != 0 {
@@ -570,7 +552,6 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
     }
 
     e.masked_pan_or_phone = next();
-    e.terminal_serial = next();
     e.card_expiry = next();
     e.auth_code = next();
     e.operation_id = next();
@@ -578,29 +559,11 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
     e.is_sber_card = next().map(|v| v == "1");
     e.terminal_id = next();
     e.datetime = next();
-    e.rrn = next();
-    next(); // sb_pilot version (skip)
+    e.rrn = next().filter(|v| !v.is_empty());
     e.card_hash = next();
-    next(); // track3
-    e.bonus_amount = next().and_then(|v| v.parse().ok());
-    e.merchant_id = next();
-    e.monitoring_type = next();
-    e.monitoring_state = next();
-    e.monitoring_message = next();
-    e.loyalty_program = next().and_then(|v| v.parse().ok());
-    e.user_reply = next();
-    e.request_id = next();
-    e.flags = next().and_then(|v| u32::from_str_radix(&v, 16).ok());
-    e.mifare_loyalty = next();
-    e.has_vas = next().map(|v| v == "1");
-    e.hash_type = next();
-    e.extended_hash = next();
-    e.par = next();
-    e.card_type_id = next();
-    e.entry_mode = next();
-    e.sbp_url = next();
-    e.sbp_order_id = next();
-    e.vendor_terminal_serial = next();
+    next(); // пустая строка (line 12)
+    next(); // строка 0 (line 13, не описана)
+    e.merchant_id = next().filter(|v| !v.is_empty());
 
     Ok(e)
 }

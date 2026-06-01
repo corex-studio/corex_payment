@@ -9,6 +9,7 @@ pub enum ProtocolType {
     #[default]
     Ttk,
     Inpas,
+    Sb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

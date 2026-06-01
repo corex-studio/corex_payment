@@ -17,7 +17,7 @@ pub struct Terminal {
 impl Terminal {
     pub fn new(config: ConnectionConfig) -> Self {
         let adapter: Box<dyn Acquiring> = match config.protocol {
-            ProtocolType::Ttk => {
+            ProtocolType::Ttk | ProtocolType::Sb => {
                 let default_sc552 = PathBuf::from_str("./libs/sc552/").unwrap_or_else(|_| {
                     let mut p = PathBuf::new();
                     p.push("C:/");
