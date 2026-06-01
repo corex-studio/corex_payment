@@ -1,4 +1,4 @@
 target/
-libs/**
+libs/
 .DS_Store
 examples/*.rs
