@@ -483,7 +483,11 @@ impl SbPilotE {
             m.insert("terminal_id".to_string(), v.clone());
         }
         if let Some(v) = &self.datetime {
-            m.insert("datetime".to_string(), v.clone());
+            let ts = chrono::NaiveDateTime::parse_from_str(v, "%Y%m%d%H%M%S")
+                .ok()
+                .map(|dt| dt.and_utc().timestamp_millis().to_string())
+                .unwrap_or_else(|| v.clone());
+            m.insert("datetime".to_string(), ts);
         }
         if let Some(v) = &self.rrn {
             m.insert("rrn".to_string(), v.clone());

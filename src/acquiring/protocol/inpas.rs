@@ -324,6 +324,18 @@ impl InpasAdapter {
             ));
         }
 
+        fn parse_datetime(s: &str) -> String {
+            chrono::NaiveDateTime::parse_from_str(s, "%Y%m%d%H%M%S")
+                .map(|dt| dt.and_utc().timestamp_millis().to_string())
+                .unwrap_or_else(|_| s.to_string())
+        }
+        if let Some(v) = data.get(inpas_prop_codes::DATETIME_HOST) {
+            data.insert(inpas_prop_codes::DATETIME_HOST.to_string(), parse_datetime(v));
+        }
+        if let Some(v) = data.get(inpas_prop_codes::TERMINAL_DATETIME) {
+            data.insert(inpas_prop_codes::TERMINAL_DATETIME.to_string(), parse_datetime(v));
+        }
+
         let normalized_data = normalize_terminal_response(crate::ProtocolType::Inpas, &data);
         Ok(ProcessSuccess::new(
             "Successful Inpas request",
