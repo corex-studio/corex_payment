@@ -2,17 +2,18 @@ use async_trait::async_trait;
 use std::result::Result;
 
 use crate::{
-    ProcessError, ProcessSuccess, acquiring::types::NormalizedTransactionData,
+    ProcessError, ProcessSuccess,
+    acquiring::types::{ConnectionStatus, NormalizedTransactionData},
     healthcheck::HealthcheckResult,
 };
 
 #[async_trait]
 pub trait Acquiring: Send + Sync {
-    async fn connected(&self) -> bool;
+    async fn connected(&self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError>;
 
-    async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError>;
+    async fn connect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError>;
 
-    async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError>;
+    async fn disconnect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError>;
 
     async fn payment(
         &mut self,
@@ -28,5 +29,5 @@ pub trait Acquiring: Send + Sync {
         currency: Option<String>,
     ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError>;
 
-    async fn healthcheck(&self) -> HealthcheckResult;
+    async fn healthcheck(&self) -> Result<ProcessSuccess<HealthcheckResult>, ProcessError>;
 }

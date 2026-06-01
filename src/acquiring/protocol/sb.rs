@@ -15,8 +15,9 @@ use encoding_rs::WINDOWS_1251;
 use crate::{
     ConnectionConfig, ConnectionType, ProcessError, ProcessSuccess,
     acquiring::{
-        protocol::base::Acquiring, response::normalize_terminal_response,
-        types::NormalizedTransactionData,
+        protocol::base::Acquiring,
+        response::normalize_terminal_response,
+        types::{ConnectionStatus, NormalizedTransactionData},
     },
     healthcheck::{HealthcheckResult, Healthchecker},
 };
@@ -140,11 +141,19 @@ impl SBAdapter {
 
 #[async_trait]
 impl Acquiring for SBAdapter {
-    async fn connected(&self) -> bool {
-        self.is_connected
+    async fn connected(
+        &self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
+        Ok(ProcessSuccess::new(
+            "Connection check",
+            ConnectionStatus::new(self.is_connected),
+            Value::Bool(self.is_connected),
+        ))
     }
 
-    async fn connect(&mut self) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
+    async fn connect(
+        &mut self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         self.get_cmd()?;
 
         let pinpad_ini = self.get_pinpad_ini()?;
@@ -189,17 +198,19 @@ impl Acquiring for SBAdapter {
 
         Ok(ProcessSuccess::new(
             "Files sb_pilot and pinpad.ini are ready to be used",
-            true,
+            ConnectionStatus::new(true),
             Value::Bool(true),
         ))
     }
 
-    async fn disconnect(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
+    async fn disconnect(
+        &mut self,
+    ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         self.is_connected = false;
         Ok(ProcessSuccess::new(
             "Disconnection is not actually needed for SB adapter",
-            (),
-            Value::Null,
+            ConnectionStatus::new(false),
+            Value::Bool(false),
         ))
     }
 
@@ -293,8 +304,14 @@ impl Acquiring for SBAdapter {
         ))
     }
 
-    async fn healthcheck(&self) -> HealthcheckResult {
-        self.run_healthcheck().await
+    async fn healthcheck(&self) -> Result<ProcessSuccess<HealthcheckResult>, ProcessError> {
+        let result = self.run_healthcheck().await;
+        let raw_result = serde_json::to_value(&result).unwrap_or(Value::Null);
+        Ok(ProcessSuccess::new(
+            "Healthcheck completed",
+            result,
+            raw_result,
+        ))
     }
 }
 

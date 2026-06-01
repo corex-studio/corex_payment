@@ -33,6 +33,17 @@ pub struct ConnectionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionStatus {
+    pub is_connected: bool,
+}
+
+impl ConnectionStatus {
+    pub fn new(is_connected: bool) -> Self {
+        Self { is_connected }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedTransactionData {
     pub status_name: Option<String>,
     pub amount: Option<f64>,

@@ -8,34 +8,6 @@ use crate::{
 use anyhow::anyhow;
 use async_trait::async_trait;
 
-// pub async fn healthcheck(config: KktConfig) -> HealthcheckResult {
-//     let port_connected = check_port(config).await;
-//     let drivers_ready = check_drivers();
-//
-//     let success = port_connected.is_success() && drivers_ready.is_success();
-//     if success {
-//         return HealthcheckResult::success();
-//     }
-//
-//     let mut message: String = String::new();
-//     let mut details: Vec<String> = Vec::new();
-//
-//     if let CheckUnit::Error(m, e) = port_connected {
-//         message = format!("{}\n", m);
-//         if let Some(err) = e {
-//             details.push(format!("{}", err));
-//         }
-//     }
-//     if let CheckUnit::Error(m, e) = drivers_ready {
-//         message = format!("{}\n", m);
-//         if let Some(err) = e {
-//             details.push(format!("{}", err));
-//         }
-//     }
-//
-//     HealthcheckResult::error(message, details)
-// }
-
 #[async_trait]
 impl Healthchecker for Kkt {
     async fn check_port(&self) -> CheckUnit {

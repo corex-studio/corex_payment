@@ -1,8 +1,8 @@
 use crate::ConnectionType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::response::normalize_terminal_response;
-use crate::acquiring::types::{ConnectionConfig, NormalizedTransactionData};
-use crate::healthcheck::HealthcheckResult;
+use crate::acquiring::types::{ConnectionConfig, ConnectionStatus, NormalizedTransactionData};
+use crate::healthcheck::{HealthcheckResult, Healthchecker};
 use crate::{ProcessError, ProcessSuccess};
 use async_trait::async_trait;
 use quick_xml::Writer;
@@ -30,7 +30,7 @@ pub mod inpas_prop_codes {
 }
 
 pub struct InpasAdapter {
-    config: ConnectionConfig,
+    pub config: ConnectionConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -404,23 +404,27 @@ impl InpasAdapter {
 
 #[async_trait]
 impl Acquiring for InpasAdapter {
-    async fn connected(&self) -> bool {
-        true
-    }
-
-    async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
+    async fn connected(&self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         Ok(ProcessSuccess::new(
-            "No need to connect since Inpas works via HTTP requests".to_string(),
-            true,
+            "Connection check",
+            ConnectionStatus::new(true),
             Value::Bool(true),
         ))
     }
 
-    async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
+    async fn connect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
+        Ok(ProcessSuccess::new(
+            "No need to connect since Inpas works via HTTP requests".to_string(),
+            ConnectionStatus::new(true),
+            Value::Bool(true),
+        ))
+    }
+
+    async fn disconnect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         Ok(ProcessSuccess::new(
             "No need to disconnect since Inpas works via HTTP requests".to_string(),
-            (),
-            Value::Null,
+            ConnectionStatus::new(false),
+            Value::Bool(false),
         ))
     }
 
@@ -485,8 +489,14 @@ impl Acquiring for InpasAdapter {
         self.send_inpas_request(&fields).await
     }
 
-    async fn healthcheck(&self) -> HealthcheckResult {
-        HealthcheckResult::success()
+    async fn healthcheck(&self) -> Result<ProcessSuccess<HealthcheckResult>, ProcessError> {
+        let result = self.run_healthcheck().await;
+        let raw_result = serde_json::to_value(&result).unwrap_or(Value::Null);
+        Ok(ProcessSuccess::new(
+            "Healthcheck completed",
+            result,
+            raw_result,
+        ))
     }
 }
 

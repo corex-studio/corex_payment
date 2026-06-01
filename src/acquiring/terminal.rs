@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::ProtocolType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
-use crate::acquiring::types::{ConnectionConfig, NormalizedTransactionData};
+use crate::acquiring::types::{ConnectionConfig, ConnectionStatus, NormalizedTransactionData};
 use crate::healthcheck::HealthcheckResult;
 use crate::{ProcessError, ProcessSuccess};
 use std::path::PathBuf;
@@ -41,11 +41,11 @@ impl Terminal {
 
 #[async_trait]
 impl Acquiring for Terminal {
-    async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
+    async fn connect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         self.adapter.connect().await
     }
 
-    async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
+    async fn disconnect(&mut self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         self.adapter.disconnect().await
     }
 
@@ -69,11 +69,11 @@ impl Acquiring for Terminal {
         self.adapter.refund(amount, currency).await
     }
 
-    async fn connected(&self) -> bool {
+    async fn connected(&self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
         self.adapter.connected().await
     }
 
-    async fn healthcheck(&self) -> HealthcheckResult {
+    async fn healthcheck(&self) -> Result<ProcessSuccess<HealthcheckResult>, ProcessError> {
         self.adapter.healthcheck().await
     }
 }
