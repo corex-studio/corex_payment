@@ -1,12 +1,14 @@
+use async_trait::async_trait;
+
 use crate::ProtocolType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
-use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
+use crate::acquiring::types::{ConnectionConfig, NormalizedTransactionData};
 use crate::healthcheck::HealthcheckResult;
-use crate::{ProcessSuccess, ProcessError};
+use crate::{ProcessError, ProcessSuccess};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::result::Result;
+use std::str::FromStr;
 
 pub struct Terminal {
     adapter: Box<dyn Acquiring>,
@@ -35,40 +37,43 @@ impl Terminal {
 
         Self { adapter }
     }
+}
 
-    pub async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
+#[async_trait]
+impl Acquiring for Terminal {
+    async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
         self.adapter.connect().await
     }
 
-    pub async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
+    async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
         self.adapter.disconnect().await
     }
 
-    pub async fn payment(
+    async fn payment(
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         self.adapter.payment(amount, currency).await
     }
 
-    pub async fn totals(&mut self) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    async fn totals(&mut self) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         self.adapter.totals().await
     }
 
-    pub async fn refund(
+    async fn refund(
         &mut self,
         amount: u64,
         currency: Option<String>,
-    ) -> Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         self.adapter.refund(amount, currency).await
     }
 
-    pub async fn connected(&self) -> bool {
+    async fn connected(&self) -> bool {
         self.adapter.connected().await
     }
 
-    pub async fn healthcheck(&self) -> HealthcheckResult {
+    async fn healthcheck(&self) -> HealthcheckResult {
         self.adapter.healthcheck().await
     }
 }

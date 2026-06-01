@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use serde::Serialize;
+use serde_json::Value;
 use std::{
+    collections::HashMap,
     fmt::Display,
     fs,
     path::{Path, PathBuf},
@@ -11,8 +13,11 @@ use async_trait::async_trait;
 use encoding_rs::WINDOWS_1251;
 
 use crate::{
-    ConnectionConfig, ConnectionType, TerminalResponse, ProcessSuccess, ProcessError,
-    acquiring::{protocol::base::Acquiring, types::NormalizedTransactionData},
+    ConnectionConfig, ConnectionType, ProcessError, ProcessSuccess,
+    acquiring::{
+        protocol::base::Acquiring, response::normalize_terminal_response,
+        types::NormalizedTransactionData,
+    },
     healthcheck::{HealthcheckResult, Healthchecker},
 };
 
@@ -51,19 +56,25 @@ impl SBAdapter {
         }
     }
 
-    pub fn get_pinpad_ini(&self) -> Result<PathBuf> {
+    pub fn get_pinpad_ini(&self) -> std::result::Result<PathBuf, ProcessError> {
         let pinpad_ini = self.dir.join("pinpad.ini");
 
         match pinpad_ini.exists() {
             true => Ok(pinpad_ini),
-            false => Err(anyhow!("Missing pinpad.ini")),
+            false => Err(ProcessError::new(
+                "Missing pinpad.ini file",
+                Value::String(format!("{:?}", pinpad_ini).to_string()),
+            )),
         }
     }
 
-    fn get_cmd(&self) -> Result<Command> {
+    fn get_cmd(&self) -> std::result::Result<Command, ProcessError> {
         match self.get_pilot() {
             Ok(v) => Ok(Command::new(v)),
-            Err(e) => Err(anyhow!(e)),
+            Err(e) => Err(ProcessError::new(
+                "Missing sbpilot",
+                Value::String(e.to_string()),
+            )),
         }
     }
 
@@ -141,89 +152,155 @@ impl Acquiring for SBAdapter {
     }
 
     async fn connect(&mut self) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
-        self.get_cmd().map_err(|e| ProcessError::new("CONNECT_FAIL", "Ошибка получения команды", e.to_string()))?;
+        self.get_cmd()?;
 
-        let pinpad_ini = self.get_pinpad_ini().map_err(|e| ProcessError::new("CONNECT_FAIL", "Отсутствует конфигурация терминала", e.to_string()))?;
-        let mut ini_editor = IniEditor::load(&pinpad_ini).map_err(|e| ProcessError::new("CONNECT_FAIL", "Ошибка загрузки конфигурации", e.to_string()))?;
+        let pinpad_ini = self.get_pinpad_ini()?;
+        let mut ini_editor = IniEditor::load(&pinpad_ini).map_err(|e| {
+            ProcessError::new(
+                "Failed to read pinpad.ini file",
+                Value::String(e.to_string()),
+            )
+        })?;
 
         match &self.config.connection_type {
             ConnectionType::Usb => {
-                let edits = self.configure_usb().map_err(|e| ProcessError::new("CONNECT_FAIL", "Ошибка настройки USB", e.to_string()))?;
+                let edits = self.configure_usb().map_err(|e| {
+                    ProcessError::new(
+                        "Unable to configure as USB type",
+                        Value::String(e.to_string()),
+                    )
+                })?;
                 ini_editor.edit_many(edits);
             }
             ConnectionType::Tcp => {
-                let edits = self.configure_tcp().map_err(|e| ProcessError::new("CONNECT_FAIL", "Ошибка настройки TCP", e.to_string()))?;
+                let edits = self.configure_tcp().map_err(|e| {
+                    ProcessError::new(
+                        "Unable to configure as TCP type",
+                        Value::String(e.to_string()),
+                    )
+                })?;
                 ini_editor.edit_many(edits);
             }
-            _ => return Err(ProcessError::new("CONNECT_FAIL", "Метод не поддерживается", "Not yet implemented")),
+            _ => {
+                return Err(ProcessError::new(
+                    "Unimplemented type of connection",
+                    Value::String(format!("{:?}", &self.config.connection_type)),
+                ));
+            }
         };
-        ini_editor.save(pinpad_ini).map_err(|e| ProcessError::new("CONNECT_FAIL", "Ошибка сохранения конфигурации", e.to_string()))?;
+        ini_editor.save(pinpad_ini).map_err(|e| {
+            ProcessError::new("Failed to save pinpad.ini", Value::String(e.to_string()))
+        })?;
 
         self.is_connected = true;
 
-        Ok(ProcessSuccess::new("CONNECT_SUCCESSFUL", true))
+        Ok(ProcessSuccess::new(
+            "Files sb_pilot and pinpad.ini are ready to be used",
+            true,
+            Value::Bool(true),
+        ))
     }
 
     async fn disconnect(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
         self.is_connected = false;
-        Ok(ProcessSuccess::new("DISCONNECT_SUCCESSFUL", ()))
+        Ok(ProcessSuccess::new(
+            "Disconnection is not actually needed for SB adapter",
+            (),
+            Value::Null,
+        ))
     }
 
-    async fn payment(&mut self, amount: u64, _: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
-        let mut cmd = self.get_cmd().map_err(|e| ProcessError::new("PAYMENT_FAIL", "Ошибка выполнения команды терминала", e.to_string()))?;
+    async fn payment(
+        &mut self,
+        amount: u64,
+        _: Option<String>,
+    ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let mut cmd = self.get_cmd()?;
         cmd.args(["1", &format!("{}", amount)]);
 
-        let res = cmd.output().map_err(|e| ProcessError::new("PAYMENT_FAIL", "Не удалось запустить процесс оплаты", e.to_string()))?;
+        let res = cmd.output().map_err(|e| {
+            ProcessError::new(
+                "Failed to run payment command",
+                Value::String(e.to_string()),
+            )
+        })?;
         let success = res.status.success();
-        let code = res.status.code().map(|v| v.to_string());
 
-        let e_strings = self.read_e();
-        let data = match e_strings {
-            Ok(_) => Some(NormalizedTransactionData::empty()),
-            Err(_) => None,
-        };
+        if !success {
+            let code = res.status.code().unwrap_or(-1);
+            return Err(ProcessError::new_with_input(
+                "Failed to run payment command",
+                Value::String(format!("Operation status code: {code}")),
+                Some(format!("{amount}")),
+            ));
+        }
 
-        Ok(ProcessSuccess::new("PAYMENT_SUCCESSFUL", TerminalResponse {
-            success,
-            code,
+        let e_strings = self.read_e().unwrap_or(SbPilotE::empty());
+        let data = normalize_terminal_response(crate::ProtocolType::Ttk, &e_strings.as_hash_map());
+
+        Ok(ProcessSuccess::new(
+            "Payment command success",
             data,
-            message: None,
-            error: None,
-        }))
+            Value::String(format!("{:?}", e_strings)),
+        ))
     }
 
-    async fn refund(&mut self, amount: u64, _: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
-        let mut cmd = self.get_cmd().map_err(|e| ProcessError::new("REFUND_FAIL", "Ошибка выполнения команды терминала", e.to_string()))?;
+    async fn refund(
+        &mut self,
+        amount: u64,
+        _: Option<String>,
+    ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let mut cmd = self.get_cmd()?;
         cmd.args(["3", &format!("{}", amount)]);
 
-        let res = cmd.output().map_err(|e| ProcessError::new("REFUND_FAIL", "Не удалось запустить процесс возврата", e.to_string()))?;
+        let res = cmd.output().map_err(|e| {
+            ProcessError::new("Failed to run refund command", Value::String(e.to_string()))
+        })?;
         let success = res.status.success();
-        let code = res.status.code().map(|v| v.to_string());
 
-        Ok(ProcessSuccess::new("REFUND_SUCCESSFUL", TerminalResponse {
-            success,
-            code,
-            data: None,
-            message: None,
-            error: None,
-        }))
+        if !success {
+            let code = res.status.code().unwrap_or(-1);
+            return Err(ProcessError::new_with_input(
+                "Failed to run refund command",
+                Value::String(format!("Operation status code: {code}")),
+                Some(format!("{amount}")),
+            ));
+        }
+
+        let e_strings = self.read_e().unwrap_or(SbPilotE::empty());
+        let data = normalize_terminal_response(crate::ProtocolType::Ttk, &e_strings.as_hash_map());
+
+        Ok(ProcessSuccess::new(
+            "Refund command success",
+            data,
+            Value::String(format!("{:?}", e_strings)),
+        ))
     }
 
-    async fn totals(&mut self) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
-        let mut cmd = self.get_cmd().map_err(|e| ProcessError::new("TOTALS_FAIL", "Ошибка выполнения команды терминала", e.to_string()))?;
+    async fn totals(
+        &mut self,
+    ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let mut cmd = self.get_cmd()?;
         cmd.arg("7");
 
-        let res = cmd.output().map_err(|e| ProcessError::new("TOTALS_FAIL", "Не удалось запустить операцию сверки", e.to_string()))?;
+        let res = cmd.output().map_err(|e| {
+            ProcessError::new("Failed to run totals command", Value::String(e.to_string()))
+        })?;
         let success = res.status.success();
-        let code = res.status.code().map(|v| v.to_string());
 
-        Ok(ProcessSuccess::new("TOTALS_SUCCESSFUL", TerminalResponse {
-            success,
-            code,
-            data: None,
-            message: None,
-            error: None,
-        }))
+        if !success {
+            let code = res.status.code().unwrap_or(-1);
+            return Err(ProcessError::new(
+                "Failed to run refund command",
+                Value::String(format!("Operation status code: {code}")),
+            ));
+        }
+
+        Ok(ProcessSuccess::new(
+            "Totals command success",
+            NormalizedTransactionData::empty(),
+            Value::Null,
+        ))
     }
 
     async fn healthcheck(&self) -> HealthcheckResult {
@@ -349,7 +426,6 @@ fn keep_only_digits(s: String) -> String {
 pub struct SbPilotE {
     pub result_code: i32,
     pub result_text: String,
-
     pub masked_pan_or_phone: Option<String>,
     pub terminal_serial: Option<String>,
     pub card_expiry: Option<String>,
@@ -380,6 +456,49 @@ pub struct SbPilotE {
     pub sbp_url: Option<String>,
     pub sbp_order_id: Option<String>,
     pub vendor_terminal_serial: Option<String>,
+}
+
+impl SbPilotE {
+    pub fn empty() -> Self {
+        Self {
+            result_code: -1,
+            result_text: "".to_string(),
+            masked_pan_or_phone: None,
+            terminal_serial: None,
+            card_expiry: None,
+            auth_code: None,
+            operation_id: None,
+            card_type: None,
+            is_sber_card: None,
+            terminal_id: None,
+            datetime: None,
+            rrn: None,
+            card_hash: None,
+            bonus_amount: None,
+            merchant_id: None,
+            monitoring_type: None,
+            monitoring_state: None,
+            monitoring_message: None,
+            loyalty_program: None,
+            user_reply: None,
+            request_id: None,
+            flags: None,
+            mifare_loyalty: None,
+            has_vas: None,
+            hash_type: None,
+            extended_hash: None,
+            par: None,
+            card_type_id: None,
+            entry_mode: None,
+            sbp_url: None,
+            sbp_order_id: None,
+            vendor_terminal_serial: None,
+        }
+    }
+
+    pub fn as_hash_map(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
 }
 
 pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {

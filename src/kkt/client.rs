@@ -2,6 +2,7 @@ use super::Kkt;
 use super::types;
 use crate::{ProcessError, ProcessSuccess};
 use anyhow::Result;
+use serde_json::Value;
 
 impl Kkt {
     fn make_url(&self, action: &str) -> String {
@@ -48,16 +49,14 @@ impl Kkt {
             Ok(b) => match serde_json::from_slice(&b) {
                 Ok(d) => Ok(d),
                 Err(e) => Err(ProcessError::new_with_input(
-                    "KKT_RESPONSE_PARSING_ERROR",
-                    "Не удалось обработать ответ от ККТ",
-                    e.to_string(),
+                    "Could not parse KKT response",
+                    Value::String(e.to_string()),
                     raw_input,
                 )),
             },
             Err(e) => Err(ProcessError::new_with_input(
-                "KKT_RESPONSE_BYTES_ERROR",
-                "Не удалось прочитать ответ от ККТ",
-                e.to_string(),
+                "Could not read KKT response",
+                Value::String(e.to_string()),
                 raw_input,
             )),
         }
@@ -81,8 +80,9 @@ impl Kkt {
         let response = self.send("check", "GET", None).await;
         let connected = response.is_ok();
         Ok(ProcessSuccess::new(
-            "CHECK_CONNECTION_SUCCESSFUL",
+            "Connection status",
             connected,
+            Value::Bool(connected),
         ))
     }
 
@@ -113,10 +113,10 @@ impl Kkt {
         sell_task: &types::SellTask,
     ) -> std::result::Result<ProcessSuccess<serde_json::Value>, ProcessError> {
         let data = serde_json::to_value(sell_task).map_err(|e| {
-            ProcessError::new(
-                "PAYMENT_FAIL",
-                "Ошибка формирования данных для оплаты",
-                e.to_string(),
+            ProcessError::new_with_input(
+                "Failed to parse input data into JSON value",
+                Value::String(e.to_string()),
+                Some(format!("{:?}", sell_task)),
             )
         })?;
         self.send("payment", "POST", Some(&data)).await
@@ -127,10 +127,10 @@ impl Kkt {
         sell_task: &types::SellTask,
     ) -> std::result::Result<ProcessSuccess<serde_json::Value>, ProcessError> {
         let data = serde_json::to_value(sell_task).map_err(|e| {
-            ProcessError::new(
-                "REFUND_FAIL",
-                "Ошибка формирования данных для возврата",
-                e.to_string(),
+            ProcessError::new_with_input(
+                "Failed to parse input data into JSON value",
+                Value::String(e.to_string()),
+                Some(format!("{:?}", sell_task)),
             )
         })?;
         self.send("refund", "POST", Some(&data)).await

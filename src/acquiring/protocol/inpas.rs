@@ -1,16 +1,33 @@
 use crate::ConnectionType;
 use crate::acquiring::protocol::base::Acquiring;
-use crate::acquiring::response::build_terminal_response_from_raw;
-use crate::acquiring::types::{ConnectionConfig, TerminalResponse};
+use crate::acquiring::response::normalize_terminal_response;
+use crate::acquiring::types::{ConnectionConfig, NormalizedTransactionData};
 use crate::healthcheck::HealthcheckResult;
-use crate::{ProcessSuccess, ProcessError};
-use anyhow::{Result, anyhow};
+use crate::{ProcessError, ProcessSuccess};
 use async_trait::async_trait;
 use quick_xml::Writer;
 use quick_xml::events::{BytesStart, Event};
+use serde_json::Value;
 use std::io::Cursor;
+use std::result::Result;
 
 const DEFAULT_ENCODING: &str = "windows-1251";
+
+pub mod inpas_prop_codes {
+    pub const AMOUNT: &str = "00";
+    pub const CURRENCY: &str = "04";
+    pub const DATETIME_HOST: &str = "06";
+    pub const PAN: &str = "10";
+    pub const AUTHORIZATION_CODE: &str = "13";
+    pub const REFERENCE_NUMBER: &str = "14";
+    pub const TERMINAL_DATETIME: &str = "21";
+    pub const TRXID: &str = "23";
+    pub const OPERATION_CODE: &str = "25";
+    pub const TERMINAL_TRX_ID: &str = "26";
+    pub const TERMINAL_ID: &str = "27";
+    pub const MERCHANT_ID: &str = "28";
+    pub const STATUS: &str = "39";
+}
 
 pub struct InpasAdapter {
     config: ConnectionConfig,
@@ -32,6 +49,52 @@ pub struct EnvelopeOptions {
 impl InpasAdapter {
     pub fn new(config: ConnectionConfig) -> Self {
         Self { config }
+    }
+
+    pub async fn send_inpas_request(
+        &self,
+        fields: &[InpasField],
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let dc_host = self.config.dc_host.as_ref().ok_or(ProcessError::new(
+            "dcHost property is required for inpas protocol",
+            Value::Null,
+        ))?;
+
+        let mut envelope = EnvelopeOptions {
+            timeout: self.config.timeout,
+            ipaddr: None,
+            ncom: None,
+            baudrate: None,
+        };
+
+        match &self.config.connection_type {
+            ConnectionType::Tcp => {
+                let address = self.config.address.as_ref().ok_or(ProcessError::new(
+                    "Fields address and port are required for tcp connection in inpas mode",
+                    Value::Null,
+                ))?;
+                let port = self.config.port.ok_or(ProcessError::new(
+                    "Fields address and port are required for tcp connection in inpas mode",
+                    Value::Null,
+                ))?;
+                envelope.ipaddr = Some(format!("{}:{}", address, port));
+            }
+            ConnectionType::Usb => {
+                let ncom = self.config.address.as_ref().ok_or(
+                ProcessError::new("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode", Value::Null),
+            )?;
+                let baudrate = self.config.port.ok_or(
+                ProcessError::new("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode", Value::Null),
+            )?;
+                envelope.ncom = Some(ncom.clone());
+                envelope.baudrate = Some(baudrate);
+            }
+            _ => {}
+        }
+
+        let xml_body = self.build_inpas_xml(fields, envelope)?;
+        let response = self.post_xml(dc_host, &xml_body).await?;
+        self.parse_inpas_response(&response, xml_body)
     }
 
     fn build_inpas_fields(&self, mut fields: Vec<InpasField>) -> Vec<InpasField> {
@@ -61,7 +124,11 @@ impl InpasAdapter {
         now.format("%Y%m%d%H%M%S").to_string()
     }
 
-    fn build_inpas_xml(&self, fields: &[InpasField], meta: EnvelopeOptions) -> Result<String> {
+    fn build_inpas_xml(
+        &self,
+        fields: &[InpasField],
+        meta: EnvelopeOptions,
+    ) -> anyhow::Result<String> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
         writer.write_event(Event::Decl(quick_xml::events::BytesDecl::new(
             "1.0",
@@ -108,6 +175,12 @@ impl InpasAdapter {
             writer.write_event(Event::End(BytesStart::new("baudrate").to_end()))?;
         }
 
+        let now = chrono::Utc::now();
+        let session_id = now.timestamp_millis().to_string();
+        writer.write_event(Event::Start(BytesStart::new("sessionID")))?;
+        writer.write_event(Event::Text(quick_xml::events::BytesText::new(&session_id)))?;
+        writer.write_event(Event::End(BytesStart::new("sessionID").to_end()))?;
+
         writer.write_event(Event::End(request_elem.to_end()))?;
 
         let result = writer.into_inner().into_inner();
@@ -115,49 +188,11 @@ impl InpasAdapter {
         Ok(xml_string)
     }
 
-    pub async fn send_inpas_request(&self, fields: &[InpasField]) -> Result<TerminalResponse> {
-        let dc_host = &self
-            .config
-            .dc_host
-            .as_ref()
-            .ok_or(anyhow!("dcHost property is required for inpas protocol"))?;
-
-        let mut envelope = EnvelopeOptions {
-            timeout: self.config.timeout,
-            ipaddr: None,
-            ncom: None,
-            baudrate: None,
-        };
-
-        match &self.config.connection_type {
-            ConnectionType::Tcp => {
-                let address = self.config.address.as_ref().ok_or(anyhow!(
-                    "Fields address and port are required for tcp connection in inpas mode"
-                ))?;
-                let port = self.config.port.ok_or(anyhow!(
-                    "Fields address and port are required for tcp connection in inpas mode"
-                ))?;
-                envelope.ipaddr = Some(format!("{}:{}", address, port));
-            }
-            ConnectionType::Usb => {
-                let ncom = self.config.address.as_ref().ok_or(
-                anyhow!("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode"),
-            )?;
-                let baudrate = self.config.port.ok_or(
-                anyhow!("Fields ncom and baudrate (USB port) are required for usb connection in inpas mode"),
-            )?;
-                envelope.ncom = Some(ncom.clone());
-                envelope.baudrate = Some(baudrate);
-            }
-            _ => {}
-        }
-
-        let xml_body = self.build_inpas_xml(fields, envelope)?;
-        let response = self.post_xml(dc_host, &xml_body).await?;
-        self.parse_inpas_response(&response)
-    }
-
-    fn parse_inpas_response(&self, xml: &str) -> Result<TerminalResponse> {
+    fn parse_inpas_response(
+        &self,
+        xml: &str,
+        input_data: String,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         use quick_xml::Reader;
         use quick_xml::events::Event;
 
@@ -170,14 +205,26 @@ impl InpasAdapter {
         let mut buf = Vec::new();
 
         loop {
-            match reader.read_event_into(&mut buf)? {
+            let read_event = reader.read_event_into(&mut buf).map_err(|e| {
+                ProcessError::new(
+                    "Could not read XML response from Inpas".to_string(),
+                    Value::String(e.to_string()),
+                )
+            })?;
+
+            match read_event {
                 Event::Start(e) => match e.name().as_ref() {
                     b"field" => {
                         let mut id = None;
                         let mut value = String::new();
 
                         for attr in e.attributes() {
-                            let attr = attr?;
+                            let attr = attr.map_err(|e| {
+                                ProcessError::new(
+                                    "Could not read XML attr".to_string(),
+                                    Value::String(e.to_string()),
+                                )
+                            })?;
                             if attr.key.as_ref() == b"id" {
                                 id = Some(String::from_utf8_lossy(&attr.value).to_string());
                             }
@@ -185,7 +232,15 @@ impl InpasAdapter {
 
                         let mut text_buf = Vec::new();
                         loop {
-                            match reader.read_event_into(&mut text_buf)? {
+                            let read_event_node =
+                                reader.read_event_into(&mut text_buf).map_err(|e| {
+                                    ProcessError::new(
+                                        "Could not read XML node data".to_string(),
+                                        Value::String(e.to_string()),
+                                    )
+                                })?;
+
+                            match read_event_node {
                                 Event::Text(t) => {
                                     value.push_str(&String::from_utf8_lossy(&t.into_inner()));
                                 }
@@ -201,7 +256,15 @@ impl InpasAdapter {
                     b"errorcode" => {
                         let mut text_buf = Vec::new();
                         loop {
-                            match reader.read_event_into(&mut text_buf)? {
+                            let read_event_node =
+                                reader.read_event_into(&mut text_buf).map_err(|e| {
+                                    ProcessError::new(
+                                        "Could not read XML node data".to_string(),
+                                        Value::String(e.to_string()),
+                                    )
+                                })?;
+
+                            match read_event_node {
                                 Event::Text(t) => {
                                     error_code =
                                         Some(String::from_utf8_lossy(&t.into_inner()).to_string());
@@ -214,7 +277,15 @@ impl InpasAdapter {
                     b"errordescription" | b"errorDescription" => {
                         let mut text_buf = Vec::new();
                         loop {
-                            match reader.read_event_into(&mut text_buf)? {
+                            let read_event_node =
+                                reader.read_event_into(&mut text_buf).map_err(|e| {
+                                    ProcessError::new(
+                                        "Could not read XML node data".to_string(),
+                                        Value::String(e.to_string()),
+                                    )
+                                })?;
+
+                            match read_event_node {
                                 Event::Text(t) => {
                                     error_description =
                                         Some(String::from_utf8_lossy(&t.into_inner()).to_string());
@@ -237,30 +308,31 @@ impl InpasAdapter {
             buf.clear();
         }
 
-        if let Some(code) = error_code {
-            if !code.is_empty() {
-                let error_msg = error_description
-                    .as_ref()
-                    .filter(|d| !d.is_empty())
-                    .map(|d| d.clone())
-                    .unwrap_or_else(|| format!("DualConnector error code {}", code));
-                return Ok(TerminalResponse {
-                    success: false,
-                    error: Some(error_msg),
-                    code: Some(code),
-                    message: error_description,
-                    data: None,
-                });
-            }
+        if let Some(code) = error_code
+            && !code.is_empty()
+        {
+            let error_msg = error_description
+                .as_ref()
+                .filter(|d| !d.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("DualConnector error code {}", code));
+
+            return Err(ProcessError::new_with_input(
+                format!("Inpas request has failed: {code}"),
+                Value::String(error_msg),
+                Some(input_data),
+            ));
         }
 
-        Ok(build_terminal_response_from_raw(
-            crate::acquiring::types::ProtocolType::Inpas,
-            data,
+        let normalized_data = normalize_terminal_response(crate::ProtocolType::Inpas, &data);
+        Ok(ProcessSuccess::new(
+            "Successful Inpas request",
+            normalized_data,
+            Value::String(xml.to_string()),
         ))
     }
 
-    async fn post_xml(&self, url_str: &str, xml_body: &str) -> Result<String> {
+    async fn post_xml(&self, url_str: &str, xml_body: &str) -> Result<String, ProcessError> {
         let url = self.normalize_dc_url(url_str)?;
         let body_bytes: Vec<u8> = encoding_rs::WINDOWS_1251.encode(xml_body).0.to_vec();
 
@@ -288,7 +360,10 @@ impl InpasAdapter {
 
         if status.is_client_error() || status.is_server_error() {
             let text = String::from_utf8_lossy(&bytes);
-            return Err(anyhow!("DualConnector HTTP error {}: {}", status.as_u16(), text).into());
+            return Err(ProcessError::new(
+                format!("DualConnector HTTP error {}", status.as_u16()),
+                Value::String(text.to_string()),
+            ));
         }
         let charset = extract_charset(content_type_header.as_deref());
         let decoded = match charset {
@@ -301,11 +376,18 @@ impl InpasAdapter {
         Ok(decoded)
     }
 
-    fn normalize_dc_url(&self, host: &str) -> Result<reqwest::Url> {
-        if host.starts_with("http://") || host.starts_with("https://") {
-            Ok(host.parse()?)
-        } else {
-            Ok(format!("http://{}", host).parse()?)
+    fn normalize_dc_url(&self, host: &str) -> Result<reqwest::Url, ProcessError> {
+        let mut host_str = host.to_string();
+        if !host.starts_with("http://") && !host.starts_with("https://") {
+            host_str = format!("http://{}", host);
+        }
+
+        match host_str.parse() {
+            Ok(s) => Ok(s),
+            Err(e) => Err(ProcessError::new(
+                "Could not parse DC host url",
+                Value::String(e.to_string()),
+            )),
         }
     }
 }
@@ -316,71 +398,81 @@ impl Acquiring for InpasAdapter {
         true
     }
 
-    async fn connect(&mut self) -> std::result::Result<ProcessSuccess<bool>, ProcessError> {
-        Ok(ProcessSuccess::new("CONNECT_SUCCESSFUL", true))
+    async fn connect(&mut self) -> Result<ProcessSuccess<bool>, ProcessError> {
+        Ok(ProcessSuccess::new(
+            "No need to connect since Inpas works via HTTP requests".to_string(),
+            true,
+            Value::Bool(true),
+        ))
     }
 
-    async fn disconnect(&mut self) -> std::result::Result<ProcessSuccess<()>, ProcessError> {
-        Ok(ProcessSuccess::new("DISCONNECT_SUCCESSFUL", ()))
+    async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError> {
+        Ok(ProcessSuccess::new(
+            "No need to disconnect since Inpas works via HTTP requests".to_string(),
+            (),
+            Value::Null,
+        ))
     }
 
-    async fn payment(&mut self, amount: u64, currency: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    async fn payment(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         let mut fields = self.build_inpas_fields(vec![
             InpasField {
-                id: "00".to_string(),
+                id: inpas_prop_codes::AMOUNT.to_string(),
                 value: amount.to_string(),
             },
             InpasField {
-                id: "25".to_string(),
+                id: inpas_prop_codes::OPERATION_CODE.to_string(),
                 value: "1".to_string(),
             },
         ]);
 
         if let Some(c) = currency {
             fields.push(InpasField {
-                id: "04".to_string(),
+                id: inpas_prop_codes::CURRENCY.to_string(),
                 value: c.clone(),
             });
         }
 
         self.send_inpas_request(&fields).await
-            .map(|resp| ProcessSuccess::new("PAYMENT_SUCCESSFUL", resp))
-            .map_err(|e| ProcessError::new("PAYMENT_FAIL", "Не удалось провести оплату", e.to_string()))
     }
 
-    async fn refund(&mut self, amount: u64, currency: Option<String>) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    async fn refund(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         let mut fields = self.build_inpas_fields(vec![
             InpasField {
-                id: "00".to_string(),
+                id: inpas_prop_codes::AMOUNT.to_string(),
                 value: amount.to_string(),
             },
             InpasField {
-                id: "25".to_string(),
+                id: inpas_prop_codes::OPERATION_CODE.to_string(),
                 value: "29".to_string(),
             },
         ]);
 
         if let Some(c) = currency {
             fields.push(InpasField {
-                id: "04".to_string(),
+                id: inpas_prop_codes::CURRENCY.to_string(),
                 value: c.clone(),
             });
         }
 
         self.send_inpas_request(&fields).await
-            .map(|resp| ProcessSuccess::new("REFUND_SUCCESSFUL", resp))
-            .map_err(|e| ProcessError::new("REFUND_FAIL", "Не удалось выполнить возврат", e.to_string()))
     }
 
-    async fn totals(&mut self) -> std::result::Result<ProcessSuccess<TerminalResponse>, ProcessError> {
+    async fn totals(&mut self) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         let fields = self.build_inpas_fields(vec![InpasField {
-            id: "25".to_string(),
+            id: inpas_prop_codes::OPERATION_CODE.to_string(),
             value: "59".to_string(),
         }]);
 
         self.send_inpas_request(&fields).await
-            .map(|resp| ProcessSuccess::new("TOTALS_SUCCESSFUL", resp))
-            .map_err(|e| ProcessError::new("TOTALS_FAIL", "Не удалось выполнить сверку итогов", e.to_string()))
     }
 
     async fn healthcheck(&self) -> HealthcheckResult {

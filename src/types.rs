@@ -4,51 +4,45 @@ use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessSuccess<T> {
-    pub code: String,
+    pub message: String,
     pub data: T,
+    pub raw_data: Value,
 }
 
 impl<T> ProcessSuccess<T> {
-    pub fn new(code: impl Into<String>, data: T) -> Self {
+    pub fn new(message: impl Into<String>, data: T, raw_data: Value) -> Self {
         Self {
-            code: code.into(),
+            message: message.into(),
             data,
+            raw_data,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessError {
-    pub code: String,
     pub message: String,
-    pub details: String,
+    pub raw_data: Value,
     pub input_data: Option<String>,
 }
 
 impl ProcessError {
-    pub fn new(
-        code: impl Into<String>,
-        message: impl Into<String>,
-        details: impl Into<String>,
-    ) -> Self {
+    pub fn new(message: impl Into<String>, raw_data: Value) -> Self {
         Self {
-            code: code.into(),
             message: message.into(),
-            details: details.into(),
+            raw_data,
             input_data: None,
         }
     }
 
     pub fn new_with_input(
-        code: impl Into<String>,
         message: impl Into<String>,
-        details: impl Into<String>,
+        raw_data: Value,
         input_data: Option<String>,
     ) -> Self {
         Self {
-            code: code.into(),
             message: message.into(),
-            details: details.into(),
+            raw_data,
             input_data,
         }
     }
@@ -77,9 +71,8 @@ impl ProcessError {
         };
 
         Self {
-            code: "KKT_REQUEST_FAILURE".to_string(),
-            message: "Ошибка при выполнении запроса к ККТ".to_string(),
-            details,
+            message: "Error while processing a KKT call".to_string(),
+            raw_data: Value::String(details),
             input_data,
         }
     }
@@ -87,7 +80,7 @@ impl ProcessError {
 
 impl fmt::Display for ProcessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {} ({})", self.code, self.message, self.details)
+        write!(f, "[{}] {:?}", self.message, self.raw_data)
     }
 }
 
@@ -96,9 +89,8 @@ impl std::error::Error for ProcessError {}
 impl From<anyhow::Error> for ProcessError {
     fn from(err: anyhow::Error) -> Self {
         Self {
-            code: "INTERNAL_ERROR".to_string(),
-            message: "Произошла внутренняя ошибка".to_string(),
-            details: err.to_string(),
+            message: "Internal error".to_string(),
+            raw_data: Value::String(err.to_string()),
             input_data: None,
         }
     }
@@ -107,9 +99,8 @@ impl From<anyhow::Error> for ProcessError {
 impl From<reqwest::Error> for ProcessError {
     fn from(err: reqwest::Error) -> Self {
         Self {
-            code: "NETWORK_ERROR".to_string(),
-            message: "Ошибка сети при выполнении запроса".to_string(),
-            details: err.to_string(),
+            message: "Error while HTTP call".to_string(),
+            raw_data: Value::String(err.to_string()),
             input_data: None,
         }
     }
@@ -118,9 +109,8 @@ impl From<reqwest::Error> for ProcessError {
 impl From<std::io::Error> for ProcessError {
     fn from(err: std::io::Error) -> Self {
         Self {
-            code: "IO_ERROR".to_string(),
-            message: "Ошибка ввода-вывода".to_string(),
-            details: err.to_string(),
+            message: "IO error".to_string(),
+            raw_data: Value::String(err.to_string()),
             input_data: None,
         }
     }
@@ -129,9 +119,8 @@ impl From<std::io::Error> for ProcessError {
 impl From<Box<dyn std::error::Error>> for ProcessError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
         Self {
-            code: "UNKNOWN_ERROR".to_string(),
-            message: "Неизвестная ошибка".to_string(),
-            details: err.to_string(),
+            message: "Unexpected error".to_string(),
+            raw_data: Value::String(err.to_string()),
             input_data: None,
         }
     }

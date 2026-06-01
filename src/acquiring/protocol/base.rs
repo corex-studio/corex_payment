@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use std::result::Result;
 
-use crate::{TerminalResponse, healthcheck::HealthcheckResult, ProcessSuccess, ProcessError};
+use crate::{
+    ProcessError, ProcessSuccess, acquiring::types::NormalizedTransactionData,
+    healthcheck::HealthcheckResult,
+};
 
 #[async_trait]
 pub trait Acquiring: Send + Sync {
@@ -11,11 +14,19 @@ pub trait Acquiring: Send + Sync {
 
     async fn disconnect(&mut self) -> Result<ProcessSuccess<()>, ProcessError>;
 
-    async fn payment(&mut self, amount: u64, currency: Option<String>) -> Result<ProcessSuccess<TerminalResponse>, ProcessError>;
+    async fn payment(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError>;
 
-    async fn totals(&mut self) -> Result<ProcessSuccess<TerminalResponse>, ProcessError>;
+    async fn totals(&mut self) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError>;
 
-    async fn refund(&mut self, amount: u64, currency: Option<String>) -> Result<ProcessSuccess<TerminalResponse>, ProcessError>;
+    async fn refund(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError>;
 
     async fn healthcheck(&self) -> HealthcheckResult;
 }
