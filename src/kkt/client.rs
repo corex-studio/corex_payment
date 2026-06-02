@@ -48,7 +48,11 @@ impl Kkt {
 
         match raw_bytes {
             Ok(b) => match serde_json::from_slice(&b) {
-                Ok(d) => Ok(d),
+                Ok(d) => Ok(ProcessSuccess::new(
+                    format!("Action {action} completed successfully"),
+                    d,
+                    Value::String(String::from_utf8(b.to_vec()).unwrap_or("".to_string())),
+                )),
                 Err(e) => Err(ProcessError::from_error_with_input(
                     "Could not parse KKT response",
                     e,
