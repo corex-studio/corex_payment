@@ -45,6 +45,7 @@ impl ConnectionStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedTransactionData {
+    pub is_approved: Option<bool>,
     pub status_name: Option<String>,
     pub amount: Option<f64>,
     pub card_masked_pan: Option<String>,
@@ -63,6 +64,7 @@ pub struct NormalizedTransactionData {
 impl NormalizedTransactionData {
     pub fn empty() -> Self {
         Self {
+            is_approved: None,
             amount: None,
             invoice_number: None,
             status_name: None,

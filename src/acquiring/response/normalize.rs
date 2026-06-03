@@ -16,10 +16,19 @@ pub fn normalize_terminal_response(
 }
 
 fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
+    let status = raw
+        .get("result_code")
+        .cloned()
+        .unwrap_or("".to_string())
+        .trim()
+        .to_string();
+    let is_approved = matches!(status.as_str(), "0");
+
     NormalizedTransactionData {
         raw: raw.clone(),
         amount: None,
-        status_name: raw.get("result_text").cloned(),
+        is_approved: Some(is_approved),
+        status_name: Some(status),
         card_masked_pan: raw.get("masked_pan").cloned(),
         invoice_number: None,
         authorization_code: raw.get("auth_code").cloned(),
@@ -33,13 +42,22 @@ fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
 }
 
 fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
+    let status = raw
+        .get(inpas_prop_codes::STATUS)
+        .cloned()
+        .unwrap_or("".to_string())
+        .trim()
+        .to_string();
+    let is_approved = matches!(status.as_str(), "1");
+
     NormalizedTransactionData {
         raw: raw.clone(),
         amount: raw
             .get(inpas_prop_codes::AMOUNT)
             .map(|v| v.parse::<f64>().unwrap_or(0.0)),
         card_masked_pan: raw.get(inpas_prop_codes::PAN).cloned(),
-        status_name: raw.get(inpas_prop_codes::STATUS).cloned(),
+        is_approved: Some(is_approved),
+        status_name: Some(status),
         host_timestamp: raw.get(inpas_prop_codes::DATETIME_HOST).cloned(),
         authorization_code: raw.get(inpas_prop_codes::AUTHORIZATION_CODE).cloned(),
         timestamp: raw.get(inpas_prop_codes::TERMINAL_DATETIME).cloned(),

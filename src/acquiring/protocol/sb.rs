@@ -449,6 +449,7 @@ impl SbPilotE {
     pub fn as_hash_map(&self) -> HashMap<String, String> {
         let mut m = HashMap::new();
         m.insert("result_text".to_string(), self.result_text.clone());
+        m.insert("result_code".to_string(), self.result_code.to_string());
         if let Some(v) = &self.masked_pan_or_phone {
             m.insert("masked_pan".to_string(), v.clone());
         }
