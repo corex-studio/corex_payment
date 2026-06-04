@@ -53,8 +53,8 @@ pub struct NormalizedTransactionData {
     pub authorization_code: Option<String>,
     pub terminal_id: Option<String>,
     pub merchant_id: Option<String>,
-    pub timestamp: Option<String>,
-    pub host_timestamp: Option<String>,
+    pub timestamp: Option<i64>,
+    pub host_timestamp: Option<i64>,
     pub issuer_name: Option<String>,
     pub trx_id: Option<String>,
     #[serde(flatten)]

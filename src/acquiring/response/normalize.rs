@@ -24,6 +24,12 @@ fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         .to_string();
     let is_approved = matches!(status.as_str(), "0");
 
+    let timestamp = match raw.get("datetime") {
+        Some(v) => v.trim().parse::<i64>().ok(),
+        _ => None,
+    };
+    let host_timestamp = Some(chrono::Utc::now().timestamp_millis());
+
     NormalizedTransactionData {
         raw: raw.clone(),
         amount: None,
@@ -34,9 +40,9 @@ fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         authorization_code: raw.get("auth_code").cloned(),
         terminal_id: raw.get("terminal_id").cloned(),
         merchant_id: raw.get("merchant_id").cloned(),
-        timestamp: raw.get("datetime").cloned(),
+        timestamp,
+        host_timestamp,
         issuer_name: None,
-        host_timestamp: None,
         trx_id: None,
     }
 }
@@ -50,6 +56,12 @@ fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         .to_string();
     let is_approved = matches!(status.as_str(), "1");
 
+    let timestamp = match raw.get(inpas_prop_codes::TERMINAL_DATETIME) {
+        Some(v) => v.trim().parse::<i64>().ok(),
+        _ => None,
+    };
+    let host_timestamp = Some(chrono::Utc::now().timestamp_millis());
+
     NormalizedTransactionData {
         raw: raw.clone(),
         amount: raw
@@ -58,9 +70,9 @@ fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         card_masked_pan: raw.get(inpas_prop_codes::PAN).cloned(),
         is_approved: Some(is_approved),
         status_name: Some(status),
-        host_timestamp: raw.get(inpas_prop_codes::DATETIME_HOST).cloned(),
+        timestamp,
+        host_timestamp,
         authorization_code: raw.get(inpas_prop_codes::AUTHORIZATION_CODE).cloned(),
-        timestamp: raw.get(inpas_prop_codes::TERMINAL_DATETIME).cloned(),
         invoice_number: raw.get(inpas_prop_codes::TERMINAL_TRX_ID).cloned(),
         terminal_id: raw.get(inpas_prop_codes::TERMINAL_ID).cloned(),
         merchant_id: raw.get(inpas_prop_codes::MERCHANT_ID).cloned(),
