@@ -47,6 +47,7 @@ impl ConnectionStatus {
 pub struct NormalizedTransactionData {
     pub is_approved: Option<bool>,
     pub status_name: Option<String>,
+    pub status_code: Option<String>,
     pub amount: Option<f64>,
     pub card_masked_pan: Option<String>,
     pub invoice_number: Option<String>,
@@ -68,6 +69,7 @@ impl NormalizedTransactionData {
             amount: None,
             invoice_number: None,
             status_name: None,
+            status_code: None,
             card_masked_pan: None,
             authorization_code: None,
             terminal_id: None,

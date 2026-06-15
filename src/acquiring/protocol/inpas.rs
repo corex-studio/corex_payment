@@ -19,14 +19,14 @@ pub mod inpas_prop_codes {
     pub const DATETIME_HOST: &str = "06";
     pub const PAN: &str = "10";
     pub const AUTHORIZATION_CODE: &str = "13";
-    pub const REFERENCE_NUMBER: &str = "14";
     pub const TERMINAL_DATETIME: &str = "21";
-    pub const TRXID: &str = "23";
+    pub const TRXID: &str = "14";
     pub const OPERATION_CODE: &str = "25";
-    pub const TERMINAL_TRX_ID: &str = "26";
+    pub const TERMINAL_TRX_ID: &str = "26"; // Сомнительно
     pub const TERMINAL_ID: &str = "27";
     pub const MERCHANT_ID: &str = "28";
-    pub const STATUS: &str = "39";
+    pub const STATUS: &str = "19";
+    pub const STATUS_CODE: &str = "39";
 }
 
 pub struct InpasAdapter {

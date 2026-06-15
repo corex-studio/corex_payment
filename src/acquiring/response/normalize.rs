@@ -34,7 +34,8 @@ fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
         raw: raw.clone(),
         amount: None,
         is_approved: Some(is_approved),
-        status_name: Some(status),
+        status_name: raw.get("result_text").cloned(),
+        status_code: Some(status),
         card_masked_pan: raw.get("masked_pan").cloned(),
         invoice_number: None,
         authorization_code: raw.get("auth_code").cloned(),
@@ -49,7 +50,7 @@ fn normalize_sb(raw: &HashMap<String, String>) -> NormalizedTransactionData {
 
 fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
     let status = raw
-        .get(inpas_prop_codes::STATUS)
+        .get(inpas_prop_codes::STATUS_CODE)
         .cloned()
         .unwrap_or("".to_string())
         .trim()
@@ -69,7 +70,8 @@ fn normalize_inpas(raw: &HashMap<String, String>) -> NormalizedTransactionData {
             .map(|v| v.parse::<f64>().unwrap_or(0.0)),
         card_masked_pan: raw.get(inpas_prop_codes::PAN).cloned(),
         is_approved: Some(is_approved),
-        status_name: Some(status),
+        status_name: raw.get(inpas_prop_codes::STATUS).cloned(),
+        status_code: Some(status),
         timestamp,
         host_timestamp,
         authorization_code: raw.get(inpas_prop_codes::AUTHORIZATION_CODE).cloned(),
