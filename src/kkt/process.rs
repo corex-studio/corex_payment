@@ -5,69 +5,24 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
+use sysinfo::{ProcessesToUpdate, System};
 use tokio::process::Command as TokioCommand;
 
 impl Kkt {
     pub async fn get_open_processes(
         &self,
     ) -> std::result::Result<ProcessSuccess<Vec<u32>>, ProcessError> {
-        if cfg!(target_os = "macos") {
-            let output = TokioCommand::new("pgrep")
-                .arg("-f")
-                .arg("kkt")
-                .output()
-                .await
-                .map_err(|e| {
-                    ProcessError::new(
-                        "Failed to read list of processes",
-                        Value::String(e.to_string()),
-                    )
-                })?;
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let pids: Vec<u32> = stdout
-                .lines()
-                .filter_map(|line| line.trim().parse().ok())
-                .collect();
-            Ok(ProcessSuccess::new(
-                "Successfully get list of processes",
-                pids.clone(),
-                json!(pids),
-            ))
-        } else if cfg!(target_os = "windows") {
-            let output = TokioCommand::new("wmic")
-                .args([
-                    "process",
-                    "where",
-                    "name='kkt.exe'",
-                    "get",
-                    "ProcessId",
-                    "/format:csv",
-                ])
-                .output()
-                .await
-                .map_err(|e| {
-                    ProcessError::new(
-                        "Failed to read list of processes",
-                        Value::String(e.to_string()),
-                    )
-                })?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let pids: Vec<u32> = stdout
-                .lines()
-                .skip(1)
-                .filter_map(|line| {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        return None;
-                    }
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 2 {
-                        parts[1].parse().ok()
-                    } else {
-                        None
-                    }
+        if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+            let mut system = System::new();
+            system.refresh_processes(ProcessesToUpdate::All, true);
+            let pids: Vec<u32> = system
+                .processes()
+                .values()
+                .filter(|p| {
+                    let name = p.name().to_string_lossy().to_lowercase();
+                    name.trim_end_matches(".exe") == "kkt"
                 })
+                .map(|p| p.pid().as_u32())
                 .collect();
 
             Ok(ProcessSuccess::new(
