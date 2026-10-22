@@ -17,13 +17,13 @@ pub trait Healthchecker {
         let mut details: Vec<String> = Vec::new();
 
         if let CheckUnit::Error(m, e) = port_connected {
-            message = format!("{}\n", m);
+            message.push_str(&format!("{}\n", m));
             if let Some(err) = e {
                 details.push(format!("{}", err));
             }
         }
         if let CheckUnit::Error(m, e) = drivers_ready {
-            message = format!("{}\n", m);
+            message.push_str(&format!("{}\n", m));
             if let Some(err) = e {
                 details.push(format!("{}", err));
             }
@@ -75,5 +75,37 @@ impl CheckUnit {
 
     pub fn is_error(&self) -> bool {
         matches!(self, CheckUnit::Error(_, _))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailedChecks;
+
+    #[async_trait]
+    impl Healthchecker for FailedChecks {
+        async fn check_port(&self) -> CheckUnit {
+            CheckUnit::Error("Ошибка порта".into(), Some(anyhow::anyhow!("port details")))
+        }
+
+        fn check_drivers(&self) -> CheckUnit {
+            CheckUnit::Error(
+                "Ошибка драйвера".into(),
+                Some(anyhow::anyhow!("driver details")),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn preserves_both_check_errors() {
+        let result = FailedChecks.run_healthcheck().await;
+        assert!(!result.success);
+        assert_eq!(
+            result.message.as_deref(),
+            Some("Ошибка порта\nОшибка драйвера\n")
+        );
+        assert_eq!(result.details.unwrap(), ["port details", "driver details"]);
     }
 }

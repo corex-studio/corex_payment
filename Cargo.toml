@@ -1,6 +1,6 @@
 [package]
 name = "corex_payment"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["justjew <justjew1406@gmail.com>"]
 license = "MIT"

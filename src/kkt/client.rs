@@ -82,8 +82,17 @@ impl Kkt {
     pub async fn check_connection(
         &self,
     ) -> std::result::Result<ProcessSuccess<ConnectionStatus>, ProcessError> {
-        let response = self.send("check", "GET", None).await;
-        let connected = response.is_ok();
+        let response = self.send("check", "GET", None).await?;
+        let connected = response
+            .data
+            .get("connected")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                ProcessError::new(
+                    "Некорректный ответ KKT: поле connected должно быть логическим значением",
+                    response.data.clone(),
+                )
+            })?;
         Ok(ProcessSuccess::new(
             "Connection status",
             ConnectionStatus::new(connected),

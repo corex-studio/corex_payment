@@ -1,5 +1,6 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 
+use super::ConnectionType;
 use crate::{
     Kkt,
     healthcheck::{CheckUnit, Healthchecker},
@@ -20,6 +21,36 @@ impl Healthchecker for Kkt {
                 );
             }
         };
+
+        if self.config.connection_type == ConnectionType::Tcp {
+            let tcp_port = match self.config.port {
+                Some(v) => v,
+                None => {
+                    return CheckUnit::Error(
+                        "Порт ККТ не сконфигурирован".to_string(),
+                        Some(anyhow!("KKT port not configured")),
+                    );
+                }
+            };
+
+            // kkt.exe owns the device connection; do not open a second TCP session.
+            return match tokio::time::timeout(Duration::from_secs(2), self.check_connection()).await
+            {
+                Ok(Ok(result)) if result.data.is_connected => CheckUnit::Success,
+                Ok(Ok(_)) => CheckUnit::Error(
+                    format!("ККТ не подключен по TCP к {}:{}", port, tcp_port),
+                    None,
+                ),
+                Ok(Err(e)) => CheckUnit::Error(
+                    "Ошибка при проверке TCP-подключения ККТ через KKT-сервер".to_string(),
+                    Some(anyhow!(e)),
+                ),
+                Err(e) => CheckUnit::Error(
+                    "Превышено время ожидания проверки TCP-подключения ККТ".to_string(),
+                    Some(anyhow!(e)),
+                ),
+            };
+        }
 
         let port_connected = is_device_connected(&port).await;
         match port_connected {
@@ -72,5 +103,33 @@ impl Healthchecker for Kkt {
         }
 
         CheckUnit::Success
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::KktConfig;
+
+    #[tokio::test]
+    async fn tcp_requires_configured_address_and_port() {
+        for (address, port, expected) in [
+            (None, Some(5555), "Адрес ККТ не сконфигурирован"),
+            (
+                Some("192.0.2.1".to_string()),
+                None,
+                "Порт ККТ не сконфигурирован",
+            ),
+        ] {
+            let kkt = Kkt::new(KktConfig {
+                connection_type: ConnectionType::Tcp,
+                address,
+                port,
+            });
+            match kkt.check_port().await {
+                CheckUnit::Error(message, _) => assert_eq!(message, expected),
+                CheckUnit::Success => panic!("TCP configuration must be checked"),
+            }
+        }
     }
 }
