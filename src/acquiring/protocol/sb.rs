@@ -10,7 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use encoding_rs::WINDOWS_1251;
+use encoding_rs::{IBM866, WINDOWS_1251};
 
 use crate::{
     ConnectionConfig, ConnectionType, ProcessError, ProcessSuccess,
@@ -304,7 +304,7 @@ impl Acquiring for SBAdapter {
                         }
                         _ => {}
                     }
-                    attempt["terminal_response"] = json!(WINDOWS_1251.decode(&current.bytes).0);
+                    attempt["terminal_response"] = json!(IBM866.decode(&current.bytes).0);
                     parse_sb_pilot_e_bytes(&current.bytes)
                 })();
                 match result {
@@ -612,7 +612,7 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
 }
 
 fn parse_sb_pilot_e_bytes(bytes: &[u8]) -> Result<SbPilotE> {
-    let (text, _, _) = WINDOWS_1251.decode(bytes);
+    let (text, _, _) = IBM866.decode(bytes);
     let lines: Vec<String> = text
         .into_owned()
         .lines()
@@ -702,7 +702,7 @@ mod refund_tests {
             fs::write(&pilot, format!("#!/bin/sh\n{script}\n")).unwrap();
             fs::set_permissions(&pilot, fs::Permissions::from_mode(0o700)).unwrap();
             if let Some(response) = response {
-                fs::write(dir.join("response"), WINDOWS_1251.encode(response).0).unwrap();
+                fs::write(dir.join("response"), IBM866.encode(response).0).unwrap();
             }
             Self(dir)
         }
@@ -749,6 +749,7 @@ mod refund_tests {
             assert_eq!(error.input_data.as_deref(), Some("39000"));
             let attempt = &error.raw_data["refund_attempt"];
             assert_eq!(attempt["terminal_result"]["result_code"], code);
+            assert_eq!(attempt["terminal_response"], format!("{code},{reason}\r\n"));
             assert_eq!(attempt["process"]["exit_code"], 99);
             assert_eq!(attempt["process"]["stdout"], "diagnostic-output\n");
             assert_eq!(attempt["process"]["stderr"], "diagnostic-error\n");
@@ -776,7 +777,7 @@ mod refund_tests {
         let fixture = Fixture::new("exit 99", None);
         fs::write(
             fixture.0.join("e"),
-            WINDOWS_1251.encode("4476,Нет исходной операции").0,
+            IBM866.encode("4476,Нет исходной операции").0,
         )
         .unwrap();
         let error = fixture.adapter().refund(39000, None).await.unwrap_err();
@@ -852,5 +853,19 @@ mod refund_tests {
         let fixture = Fixture::new("exit 0", None);
         fs::write(fixture.0.join("e"), "").unwrap();
         assert!(parse_sb_pilot_e(fixture.0.join("e")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod result_encoding_tests {
+    use super::*;
+
+    #[test]
+    fn reads_cp866_cancellation_from_real_result_line() {
+        // First line of the supplied e file; no card or transaction details.
+        let bytes = b"\x32\x30\x30\x30\x2c\x8e\xaf\xa5\xe0\xa0\xe6\xa8\xef\x20\xaf\xe0\xa5\xe0\xa2\xa0\xad\xa0\x20\xaa\xab\xa8\xa5\xad\xe2\xae\xac\x0d\x0a";
+        let result = parse_sb_pilot_e_bytes(bytes).unwrap();
+        assert_eq!(result.result_code, 2000);
+        assert_eq!(result.result_text, "Операция прервана клиентом");
     }
 }
