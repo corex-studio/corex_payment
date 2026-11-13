@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use crate::ProtocolType;
 use crate::acquiring::protocol::base::Acquiring;
 use crate::acquiring::protocol::{InpasAdapter, SBAdapter};
-use crate::acquiring::types::{ConnectionConfig, ConnectionStatus, NormalizedTransactionData};
+use crate::acquiring::types::{
+    ConnectionConfig, ConnectionStatus, NormalizedTransactionData, RefundMode,
+};
 use crate::healthcheck::HealthcheckResult;
 use crate::{ProcessError, ProcessSuccess};
 use std::path::PathBuf;
@@ -67,6 +69,18 @@ impl Acquiring for Terminal {
         currency: Option<String>,
     ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
         self.adapter.refund(amount, currency).await
+    }
+
+    async fn refund_with_reference(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+        rrn: String,
+        mode: RefundMode,
+    ) -> Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        self.adapter
+            .refund_with_reference(amount, currency, rrn, mode)
+            .await
     }
 
     async fn connected(&self) -> Result<ProcessSuccess<ConnectionStatus>, ProcessError> {

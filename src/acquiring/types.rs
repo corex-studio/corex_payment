@@ -91,3 +91,13 @@ pub struct TerminalResponse {
     pub data: Option<NormalizedTransactionData>,
     pub error: Option<String>,
 }
+
+/// How to identify the card when refunding an original payment by RRN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefundMode {
+    /// Read the customer's card and use RRN to locate the original payment.
+    WithCard,
+    /// Use QSELECT. Requires bank configuration and an eligible original payment.
+    WithoutCard,
+}

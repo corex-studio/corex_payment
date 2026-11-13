@@ -17,7 +17,7 @@ use crate::{
     acquiring::{
         protocol::base::Acquiring,
         response::normalize_terminal_response,
-        types::{ConnectionStatus, NormalizedTransactionData},
+        types::{ConnectionStatus, NormalizedTransactionData, RefundMode},
     },
     healthcheck::{HealthcheckResult, Healthchecker},
 };
@@ -70,6 +70,155 @@ impl SBAdapter {
                 Value::String(e.to_string()),
             )),
         }
+    }
+
+    fn run_refund(
+        &self,
+        amount: u64,
+        currency: Option<String>,
+        reference: Option<(&str, RefundMode)>,
+    ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let mut attempt = json!({
+            "attempt_id": format!("{:032x}", rand::random::<u128>()),
+            "operation": "refund",
+            "amount_minor": amount,
+            "currency": currency,
+            "original_rrn": reference.map(|(rrn, _)| rrn),
+            "refund_mode": reference.map(|(_, mode)| mode).unwrap_or(RefundMode::WithCard),
+            "validation_error": null,
+            "started_at": chrono::Utc::now().to_rfc3339(),
+            "completed_at": null,
+            "outcome": "unknown",
+            "terminal_response": null,
+            "terminal_result": null,
+            "result_file_error": null,
+            "process": {
+                "started": false, "success": null, "exit_code": null,
+                "stdout": null, "stderr": null, "launch_error": null, "wait_error": null,
+            },
+        });
+        let mut args = vec!["3".to_string(), amount.to_string()];
+        if let Some((rrn, mode)) = reference {
+            if rrn.is_empty() || !rrn.bytes().all(|byte| byte.is_ascii_digit()) {
+                let message = "Некорректный RRN исходной оплаты: ожидается непустая строка цифр";
+                attempt["outcome"] = json!("not_started");
+                attempt["validation_error"] = json!(message);
+                attempt["completed_at"] = json!(chrono::Utc::now().to_rfc3339());
+                return Err(ProcessError {
+                    message: message.to_string(),
+                    raw_data: json!({ "error": message, "refund_attempt": attempt }),
+                    input_data: Some(amount.to_string()),
+                });
+            }
+            let track2 = match mode {
+                RefundMode::WithCard => "0",
+                RefundMode::WithoutCard => "QSELECT",
+            };
+            args.extend(["0".to_string(), track2.to_string(), rrn.to_string()]);
+        }
+        let result_path = self.dir.join("e");
+        // Do not reuse the previous operation's response or remove bank-owned files.
+        let previous = read_sb_result_snapshot(&result_path);
+        let mut started = false;
+        let execution = (|| -> std::io::Result<std::process::Output> {
+            // Resolve before changing cwd so relative sc552_path also works.
+            let executable = fs::canonicalize(self.dir.join("sb_pilot.exe"))?;
+            let child = Command::new(&executable)
+                .current_dir(executable.parent().expect("Executable has a parent"))
+                .args(&args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            started = true;
+            child.wait_with_output()
+        })();
+        attempt["process"]["started"] = json!(started);
+        let mut terminal_result = None;
+        let mut process_success = false;
+        let technical_error = match execution {
+            Ok(output) => {
+                process_success = output.status.success();
+                attempt["process"]["success"] = json!(process_success);
+                attempt["process"]["exit_code"] = json!(output.status.code());
+                attempt["process"]["stdout"] = json!(decode_sb_output(&output.stdout));
+                attempt["process"]["stderr"] = json!(decode_sb_output(&output.stderr));
+                let result = (|| -> Result<SbPilotE> {
+                    let current = read_sb_result_snapshot(&result_path)?;
+                    match &previous {
+                        Ok(old) if *old == current => {
+                            return Err(anyhow!("Result file e was not updated"));
+                        }
+                        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                            return Err(anyhow!("Cannot verify result file freshness: {error}"));
+                        }
+                        _ => {}
+                    }
+                    attempt["terminal_response"] = json!(decode_sb_result(&current.bytes));
+                    parse_sb_pilot_e_bytes(&current.bytes)
+                })();
+                match result {
+                    Ok(result) => {
+                        attempt["terminal_result"] = json!(result);
+                        terminal_result = Some(result);
+                    }
+                    Err(error) => attempt["result_file_error"] = json!(error.to_string()),
+                }
+                format!(
+                    "Refund process status: {}; result file error: {}",
+                    output.status, attempt["result_file_error"]
+                )
+            }
+            Err(error) => {
+                let field = if started {
+                    "wait_error"
+                } else {
+                    "launch_error"
+                };
+                attempt["process"][field] = json!(error.to_string());
+                error.to_string()
+            }
+        };
+        attempt["completed_at"] = json!(chrono::Utc::now().to_rfc3339());
+
+        if let Some(result) = &terminal_result {
+            if result.result_code == 0 && process_success {
+                attempt["outcome"] = json!("approved");
+                let data = normalize_terminal_response(self.config.protocol, &result.as_hash_map());
+                return Ok(ProcessSuccess::new(
+                    "Refund command success",
+                    data,
+                    json!({ "refund_attempt": attempt }),
+                ));
+            }
+            if result.result_code > 0 {
+                attempt["outcome"] = json!("declined");
+                let reason = result.result_text.trim().trim_end_matches('.');
+                let message = if reason.is_empty() {
+                    format!("Возврат не выполнен. Код терминала: {}", result.result_code)
+                } else {
+                    format!(
+                        "Возврат не выполнен: {reason}. Код терминала: {}",
+                        result.result_code
+                    )
+                };
+                return Err(ProcessError {
+                    message,
+                    raw_data: json!({ "error": technical_error, "refund_attempt": attempt }),
+                    input_data: Some(amount.to_string()),
+                });
+            }
+        }
+        let message = if started {
+            "Не удалось определить результат возврата. Проверьте состояние операции."
+        } else {
+            attempt["outcome"] = json!("not_started");
+            "Возврат не выполнен: не удалось запустить банковское ПО."
+        };
+        Err(ProcessError {
+            message: message.to_string(),
+            raw_data: json!({ "error": technical_error, "refund_attempt": attempt }),
+            input_data: Some(amount.to_string()),
+        })
     }
 
     fn configure_usb(&self) -> Result<Vec<IniEdit>> {
@@ -251,125 +400,17 @@ impl Acquiring for SBAdapter {
         amount: u64,
         currency: Option<String>,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
-        let mut attempt = json!({
-            "attempt_id": format!("{:032x}", rand::random::<u128>()),
-            "operation": "refund",
-            "amount_minor": amount,
-            "currency": currency,
-            "started_at": chrono::Utc::now().to_rfc3339(),
-            "completed_at": null,
-            "outcome": "unknown",
-            "terminal_response": null,
-            "terminal_result": null,
-            "result_file_error": null,
-            "process": {
-                "started": false, "success": null, "exit_code": null,
-                "stdout": null, "stderr": null, "launch_error": null, "wait_error": null,
-            },
-        });
-        let result_path = self.dir.join("e");
-        // Do not reuse the previous operation's response or remove bank-owned files.
-        let previous = read_sb_result_snapshot(&result_path);
-        let mut started = false;
-        let execution = (|| -> std::io::Result<std::process::Output> {
-            // Resolve before changing cwd so relative sc552_path also works.
-            let executable = fs::canonicalize(self.dir.join("sb_pilot.exe"))?;
-            let child = Command::new(&executable)
-                .current_dir(executable.parent().expect("Executable has a parent"))
-                .args(["3", &amount.to_string()])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?;
-            started = true;
-            child.wait_with_output()
-        })();
-        attempt["process"]["started"] = json!(started);
-        let mut terminal_result = None;
-        let mut process_success = false;
-        let technical_error = match execution {
-            Ok(output) => {
-                process_success = output.status.success();
-                attempt["process"]["success"] = json!(process_success);
-                attempt["process"]["exit_code"] = json!(output.status.code());
-                attempt["process"]["stdout"] = json!(decode_sb_output(&output.stdout));
-                attempt["process"]["stderr"] = json!(decode_sb_output(&output.stderr));
-                let result = (|| -> Result<SbPilotE> {
-                    let current = read_sb_result_snapshot(&result_path)?;
-                    match &previous {
-                        Ok(old) if *old == current => {
-                            return Err(anyhow!("Result file e was not updated"));
-                        }
-                        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                            return Err(anyhow!("Cannot verify result file freshness: {error}"));
-                        }
-                        _ => {}
-                    }
-                    attempt["terminal_response"] = json!(decode_sb_result(&current.bytes));
-                    parse_sb_pilot_e_bytes(&current.bytes)
-                })();
-                match result {
-                    Ok(result) => {
-                        attempt["terminal_result"] = json!(result);
-                        terminal_result = Some(result);
-                    }
-                    Err(error) => attempt["result_file_error"] = json!(error.to_string()),
-                }
-                format!(
-                    "Refund process status: {}; result file error: {}",
-                    output.status, attempt["result_file_error"]
-                )
-            }
-            Err(error) => {
-                let field = if started {
-                    "wait_error"
-                } else {
-                    "launch_error"
-                };
-                attempt["process"][field] = json!(error.to_string());
-                error.to_string()
-            }
-        };
-        attempt["completed_at"] = json!(chrono::Utc::now().to_rfc3339());
+        self.run_refund(amount, currency, None)
+    }
 
-        if let Some(result) = &terminal_result {
-            if result.result_code == 0 && process_success {
-                attempt["outcome"] = json!("approved");
-                let data = normalize_terminal_response(self.config.protocol, &result.as_hash_map());
-                return Ok(ProcessSuccess::new(
-                    "Refund command success",
-                    data,
-                    json!({ "refund_attempt": attempt }),
-                ));
-            }
-            if result.result_code > 0 {
-                attempt["outcome"] = json!("declined");
-                let reason = result.result_text.trim().trim_end_matches('.');
-                let message = if reason.is_empty() {
-                    format!("Возврат не выполнен. Код терминала: {}", result.result_code)
-                } else {
-                    format!(
-                        "Возврат не выполнен: {reason}. Код терминала: {}",
-                        result.result_code
-                    )
-                };
-                return Err(ProcessError {
-                    message,
-                    raw_data: json!({ "error": technical_error, "refund_attempt": attempt }),
-                    input_data: Some(amount.to_string()),
-                });
-            }
-        }
-        let message = if started {
-            "Не удалось определить результат возврата. Проверьте состояние операции."
-        } else {
-            attempt["outcome"] = json!("not_started");
-            "Возврат не выполнен: не удалось запустить банковское ПО."
-        };
-        Err(ProcessError {
-            message: message.to_string(),
-            raw_data: json!({ "error": technical_error, "refund_attempt": attempt }),
-            input_data: Some(amount.to_string()),
-        })
+    async fn refund_with_reference(
+        &mut self,
+        amount: u64,
+        currency: Option<String>,
+        rrn: String,
+        mode: RefundMode,
+    ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        self.run_refund(amount, currency, Some((&rrn, mode)))
     }
 
     async fn totals(
@@ -753,6 +794,93 @@ mod refund_tests {
     }
 
     const WRITE_RESPONSE: &str = "test \"$1\" = 3 && test \"$2\" = 39000 || exit 88\ncp \"$(dirname \"$0\")/response\" \"$(dirname \"$0\")/e\"\necho diagnostic-output\necho diagnostic-error >&2\nexit 99";
+
+    #[tokio::test]
+    async fn legacy_refund_keeps_two_command_arguments() {
+        let fixture = Fixture::new(
+            "test \"$#\" = 2 && test \"$1\" = 3 && test \"$2\" = 19000 || exit 88\ncp response e\nexit 0",
+            Some("0,OK"),
+        );
+        let result = fixture.adapter().refund(19000, None).await.unwrap();
+        assert_eq!(result.raw_data["refund_attempt"]["outcome"], "approved");
+        assert!(result.raw_data["refund_attempt"]["original_rrn"].is_null());
+    }
+
+    #[tokio::test]
+    async fn passes_reference_and_explicit_card_mode_through_terminal() {
+        for (mode, track2) in [
+            (RefundMode::WithCard, "0"),
+            (RefundMode::WithoutCard, "QSELECT"),
+        ] {
+            let script = format!(
+                "test \"$#\" = 5 && test \"$1\" = 3 && test \"$2\" = 19000 && test \"$3\" = 0 && test \"$4\" = {track2} && test \"$5\" = 001234567890 || exit 88\ncp response e\nexit 0"
+            );
+            let fixture = Fixture::new(&script, Some("0,OK"));
+            for protocol in [crate::ProtocolType::Sb, crate::ProtocolType::Ttk] {
+                let mut config = fixture.adapter().config;
+                config.protocol = protocol;
+                config.sc552_path = Some(fixture.0.to_string_lossy().into_owned());
+                let mut terminal = crate::Terminal::new(config);
+                let result = terminal
+                    .refund_with_reference(19000, None, "001234567890".into(), mode)
+                    .await
+                    .unwrap();
+                let attempt = &result.raw_data["refund_attempt"];
+                assert_eq!(attempt["original_rrn"], "001234567890");
+                assert_eq!(attempt["refund_mode"], serde_json::to_value(mode).unwrap());
+                assert_eq!(attempt["outcome"], "approved");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_reference_does_not_start_bank_software() {
+        let fixture = Fixture::new("touch launched\nexit 0", None);
+        for rrn in ["", " ", "123\n456", "QSELECT", "12/34", "１２３"] {
+            let error = fixture
+                .adapter()
+                .refund_with_reference(19000, None, rrn.into(), RefundMode::WithCard)
+                .await
+                .unwrap_err();
+            assert!(!fixture.0.join("launched").exists());
+            assert_eq!(
+                error.raw_data["refund_attempt"]["process"]["started"],
+                false
+            );
+            assert_eq!(error.raw_data["refund_attempt"]["outcome"], "not_started");
+            assert_eq!(error.raw_data["refund_attempt"]["original_rrn"], rrn);
+        }
+    }
+
+    #[tokio::test]
+    async fn reference_is_preserved_when_terminal_declines() {
+        let fixture = Fixture::new(WRITE_RESPONSE, Some("4476,Нет исходной операции"));
+        let error = fixture
+            .adapter()
+            .refund_with_reference(39000, None, "001234567890".into(), RefundMode::WithCard)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("4476"));
+        assert_eq!(
+            error.raw_data["refund_attempt"]["original_rrn"],
+            "001234567890"
+        );
+        assert_eq!(error.raw_data["refund_attempt"]["refund_mode"], "with_card");
+    }
+
+    #[tokio::test]
+    async fn inpas_rejects_reference_without_attempting_network_call() {
+        let fixture = Fixture::new("exit 0", None);
+        let mut config = fixture.adapter().config;
+        config.protocol = crate::ProtocolType::Inpas;
+        // dc_host is absent; trying to send an Inpas operation would panic.
+        let mut terminal = crate::Terminal::new(config);
+        let error = terminal
+            .refund_with_reference(19000, None, "001234567890".into(), RefundMode::WithoutCard)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("не поддерживается"));
+    }
 
     #[tokio::test]
     async fn returns_terminal_decline_instead_of_process_exit_code() {

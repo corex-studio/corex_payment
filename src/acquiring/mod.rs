@@ -5,4 +5,4 @@ pub mod terminal;
 pub mod types;
 
 pub use terminal::Terminal;
-pub use types::{ConnectionConfig, ConnectionType, ProtocolType, TerminalResponse};
+pub use types::{ConnectionConfig, ConnectionType, ProtocolType, RefundMode, TerminalResponse};
