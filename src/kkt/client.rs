@@ -6,7 +6,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 impl Kkt {
-    fn make_url(&self, action: &str) -> String {
+    pub(super) fn make_url(&self, action: &str) -> String {
         format!("http://localhost:3000/{}", action)
     }
 

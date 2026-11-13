@@ -1,9 +1,11 @@
 mod client;
 mod healthcheck;
 mod process;
+pub mod printing;
 pub mod types;
 
 pub use types::*;
+pub use printing::*;
 
 use std::process::Child;
 
