@@ -304,7 +304,7 @@ impl Acquiring for SBAdapter {
                         }
                         _ => {}
                     }
-                    attempt["terminal_response"] = json!(IBM866.decode(&current.bytes).0);
+                    attempt["terminal_response"] = json!(decode_sb_result(&current.bytes));
                     parse_sb_pilot_e_bytes(&current.bytes)
                 })();
                 match result {
@@ -424,6 +424,28 @@ fn read_sb_result_snapshot(path: &Path) -> std::io::Result<SbResultSnapshot> {
         modified: metadata.modified()?,
         created: metadata.created().ok(),
     })
+}
+
+// Both encodings accept almost any byte sequence. Prefer Russian letters over
+// box drawing, foreign letters and symbols typical of the wrong decoding.
+// Ambiguous text cannot be identified reliably; retain CP866 as the default.
+fn decode_sb_result(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
+    let cp866 = IBM866.decode(bytes).0;
+    let cp1251 = WINDOWS_1251.decode(bytes).0;
+    let score = |text: &str| -> i64 {
+        text.chars()
+            .map(|ch| match ch {
+                'А'..='я' | 'Ё' | 'ё' => 1,
+                ch if ch.is_ascii() => 0,
+                _ => -2,
+            })
+            .sum()
+    };
+    if score(&cp1251) > score(&cp866) {
+        cp1251
+    } else {
+        cp866
+    }
 }
 
 fn decode_sb_output(bytes: &[u8]) -> String {
@@ -612,7 +634,7 @@ pub fn parse_sb_pilot_e(path: PathBuf) -> Result<SbPilotE> {
 }
 
 fn parse_sb_pilot_e_bytes(bytes: &[u8]) -> Result<SbPilotE> {
-    let (text, _, _) = IBM866.decode(bytes);
+    let text = decode_sb_result(bytes);
     let lines: Vec<String> = text
         .into_owned()
         .lines()
@@ -734,41 +756,45 @@ mod refund_tests {
 
     #[tokio::test]
     async fn returns_terminal_decline_instead_of_process_exit_code() {
-        for (code, reason) in [
-            (4476, "Нет исходной операции"),
-            (362, "Ошибка чтения карты"),
-        ] {
-            let fixture = Fixture::new(WRITE_RESPONSE, Some(&format!("{code},{reason}\r\n")));
-            let error = fixture
-                .adapter()
-                .refund(39000, Some("643".into()))
-                .await
-                .unwrap_err();
-            assert!(error.message.contains(reason), "{}", error.message);
-            assert!(error.message.contains(&code.to_string()));
-            assert_eq!(error.input_data.as_deref(), Some("39000"));
-            let attempt = &error.raw_data["refund_attempt"];
-            assert_eq!(attempt["terminal_result"]["result_code"], code);
-            assert_eq!(attempt["terminal_response"], format!("{code},{reason}\r\n"));
-            assert_eq!(attempt["process"]["exit_code"], 99);
-            assert_eq!(attempt["process"]["stdout"], "diagnostic-output\n");
-            assert_eq!(attempt["process"]["stderr"], "diagnostic-error\n");
-            assert_eq!(attempt["amount_minor"], 39000);
-            assert_eq!(attempt["currency"], "643");
-            assert_eq!(attempt["outcome"], "declined");
-            assert!(
-                attempt["attempt_id"]
-                    .as_str()
-                    .is_some_and(|id| !id.is_empty())
-            );
-            assert!(
-                chrono::DateTime::parse_from_rfc3339(attempt["started_at"].as_str().unwrap())
-                    .is_ok()
-            );
-            assert!(
-                chrono::DateTime::parse_from_rfc3339(attempt["completed_at"].as_str().unwrap())
-                    .is_ok()
-            );
+        for encoding in [IBM866, WINDOWS_1251] {
+            for (code, reason) in [
+                (4476, "Нет исходной операции"),
+                (362, "Ошибка чтения карты"),
+            ] {
+                let response = format!("{code},{reason}\r\n");
+                let fixture = Fixture::new(WRITE_RESPONSE, None);
+                fs::write(fixture.0.join("response"), encoding.encode(&response).0).unwrap();
+                let error = fixture
+                    .adapter()
+                    .refund(39000, Some("643".into()))
+                    .await
+                    .unwrap_err();
+                assert!(error.message.contains(reason), "{}", error.message);
+                assert!(error.message.contains(&code.to_string()));
+                assert_eq!(error.input_data.as_deref(), Some("39000"));
+                let attempt = &error.raw_data["refund_attempt"];
+                assert_eq!(attempt["terminal_result"]["result_code"], code);
+                assert_eq!(attempt["terminal_response"], format!("{code},{reason}\r\n"));
+                assert_eq!(attempt["process"]["exit_code"], 99);
+                assert_eq!(attempt["process"]["stdout"], "diagnostic-output\n");
+                assert_eq!(attempt["process"]["stderr"], "diagnostic-error\n");
+                assert_eq!(attempt["amount_minor"], 39000);
+                assert_eq!(attempt["currency"], "643");
+                assert_eq!(attempt["outcome"], "declined");
+                assert!(
+                    attempt["attempt_id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty())
+                );
+                assert!(
+                    chrono::DateTime::parse_from_rfc3339(attempt["started_at"].as_str().unwrap())
+                        .is_ok()
+                );
+                assert!(
+                    chrono::DateTime::parse_from_rfc3339(attempt["completed_at"].as_str().unwrap())
+                        .is_ok()
+                );
+            }
         }
     }
 
@@ -859,6 +885,33 @@ mod refund_tests {
 #[cfg(test)]
 mod result_encoding_tests {
     use super::*;
+
+    #[test]
+    fn reads_russian_results_in_both_encodings() {
+        for encoding in [IBM866, WINDOWS_1251] {
+            for (code, reason) in [
+                (2000, "Операция прервана клиентом"),
+                (4476, "Нет исходной операции"),
+                (362, "Ошибка чтения карты"),
+                (99, "НЕТ СВЯЗИ С ТЕРМИНАЛОМ"),
+                (12, "Операция не разрешена (код 12)"),
+            ] {
+                let input = format!("{code},{reason}\r\n");
+                let (bytes, _, errors) = encoding.encode(&input);
+                assert!(!errors);
+                let result = parse_sb_pilot_e_bytes(&bytes).unwrap();
+                assert_eq!(result.result_code, code);
+                assert_eq!(result.result_text, reason, "{}", encoding.name());
+            }
+        }
+    }
+
+    #[test]
+    fn reads_ascii_result_without_encoding_specific_characters() {
+        let result = parse_sb_pilot_e_bytes(b"362,Card read error\r\n").unwrap();
+        assert_eq!(result.result_code, 362);
+        assert_eq!(result.result_text, "Card read error");
+    }
 
     #[test]
     fn reads_cp866_cancellation_from_real_result_line() {
