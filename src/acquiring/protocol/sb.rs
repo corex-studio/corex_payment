@@ -78,25 +78,15 @@ impl SBAdapter {
         currency: Option<String>,
         reference: Option<(&str, RefundMode)>,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
-        let mut attempt = json!({
-            "attempt_id": format!("{:032x}", rand::random::<u128>()),
-            "operation": "refund",
-            "amount_minor": amount,
-            "currency": currency,
-            "original_rrn": reference.map(|(rrn, _)| rrn),
-            "refund_mode": reference.map(|(_, mode)| mode).unwrap_or(RefundMode::WithCard),
-            "validation_error": null,
-            "started_at": chrono::Utc::now().to_rfc3339(),
-            "completed_at": null,
-            "outcome": "unknown",
-            "terminal_response": null,
-            "terminal_result": null,
-            "result_file_error": null,
-            "process": {
-                "started": false, "success": null, "exit_code": null,
-                "stdout": null, "stderr": null, "launch_error": null, "wait_error": null,
-            },
-        });
+        let mut attempt = new_sb_attempt("refund");
+        attempt["amount_minor"] = json!(amount);
+        attempt["currency"] = json!(currency);
+        attempt["original_rrn"] = json!(reference.map(|(rrn, _)| rrn));
+        attempt["refund_mode"] = json!(
+            reference
+                .map(|(_, mode)| mode)
+                .unwrap_or(RefundMode::WithCard)
+        );
         let mut args = vec!["3".to_string(), amount.to_string()];
         if let Some((rrn, mode)) = reference {
             if rrn.is_empty() || !rrn.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -116,69 +106,12 @@ impl SBAdapter {
             };
             args.extend(["0".to_string(), track2.to_string(), rrn.to_string()]);
         }
-        let result_path = self.dir.join("e");
-        // Do not reuse the previous operation's response or remove bank-owned files.
-        let previous = read_sb_result_snapshot(&result_path);
-        let mut started = false;
-        let execution = (|| -> std::io::Result<std::process::Output> {
-            // Resolve before changing cwd so relative sc552_path also works.
-            let executable = fs::canonicalize(self.dir.join("sb_pilot.exe"))?;
-            let child = Command::new(&executable)
-                .current_dir(executable.parent().expect("Executable has a parent"))
-                .args(&args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?;
-            started = true;
-            child.wait_with_output()
-        })();
-        attempt["process"]["started"] = json!(started);
-        let mut terminal_result = None;
-        let mut process_success = false;
-        let technical_error = match execution {
-            Ok(output) => {
-                process_success = output.status.success();
-                attempt["process"]["success"] = json!(process_success);
-                attempt["process"]["exit_code"] = json!(output.status.code());
-                attempt["process"]["stdout"] = json!(decode_sb_output(&output.stdout));
-                attempt["process"]["stderr"] = json!(decode_sb_output(&output.stderr));
-                let result = (|| -> Result<SbPilotE> {
-                    let current = read_sb_result_snapshot(&result_path)?;
-                    match &previous {
-                        Ok(old) if *old == current => {
-                            return Err(anyhow!("Result file e was not updated"));
-                        }
-                        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                            return Err(anyhow!("Cannot verify result file freshness: {error}"));
-                        }
-                        _ => {}
-                    }
-                    attempt["terminal_response"] = json!(decode_sb_result(&current.bytes));
-                    parse_sb_pilot_e_bytes(&current.bytes)
-                })();
-                match result {
-                    Ok(result) => {
-                        attempt["terminal_result"] = json!(result);
-                        terminal_result = Some(result);
-                    }
-                    Err(error) => attempt["result_file_error"] = json!(error.to_string()),
-                }
-                format!(
-                    "Refund process status: {}; result file error: {}",
-                    output.status, attempt["result_file_error"]
-                )
-            }
-            Err(error) => {
-                let field = if started {
-                    "wait_error"
-                } else {
-                    "launch_error"
-                };
-                attempt["process"][field] = json!(error.to_string());
-                error.to_string()
-            }
-        };
-        attempt["completed_at"] = json!(chrono::Utc::now().to_rfc3339());
+        let PilotExecution {
+            started,
+            process_success,
+            terminal_result,
+            technical_error,
+        } = self.execute_pilot(&args, &mut attempt);
 
         if let Some(result) = &terminal_result {
             if result.result_code == 0 && process_success {
@@ -218,6 +151,116 @@ impl SBAdapter {
             message: message.to_string(),
             raw_data: json!({ "error": technical_error, "refund_attempt": attempt }),
             input_data: Some(amount.to_string()),
+        })
+    }
+
+    // Shared by all bank operations so failure details are never discarded.
+    fn execute_pilot(&self, args: &[String], attempt: &mut Value) -> PilotExecution {
+        let result_path = self.dir.join("e");
+        // Do not reuse the previous operation's response or remove bank-owned files.
+        let previous = read_sb_result_snapshot(&result_path);
+        let mut started = false;
+        let execution = (|| -> std::io::Result<std::process::Output> {
+            // Resolve before changing cwd so relative sc552_path also works.
+            let executable = fs::canonicalize(self.dir.join("sb_pilot.exe"))?;
+            let child = Command::new(&executable)
+                .current_dir(executable.parent().expect("Executable has a parent"))
+                .args(args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            started = true;
+            child.wait_with_output()
+        })();
+        attempt["process"]["started"] = json!(started);
+        let mut terminal_result = None;
+        let mut process_success = false;
+        let technical_error = match execution {
+            Ok(output) => {
+                process_success = output.status.success();
+                attempt["process"]["success"] = json!(process_success);
+                attempt["process"]["exit_code"] = json!(output.status.code());
+                attempt["process"]["stdout"] = json!(decode_sb_output(&output.stdout));
+                attempt["process"]["stderr"] = json!(decode_sb_output(&output.stderr));
+                let result = (|| -> Result<SbPilotE> {
+                    let current = read_sb_result_snapshot(&result_path)?;
+                    attempt["terminal_response"] = json!(decode_sb_result(&current.bytes));
+                    match &previous {
+                        Ok(old) if *old == current => {
+                            return Err(anyhow!("Result file e was not updated"));
+                        }
+                        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                            return Err(anyhow!("Cannot verify result file freshness: {error}"));
+                        }
+                        _ => {}
+                    }
+                    parse_sb_pilot_e_bytes(&current.bytes)
+                })();
+                match result {
+                    Ok(result) => {
+                        attempt["terminal_result"] = json!(result);
+                        terminal_result = Some(result);
+                    }
+                    Err(error) => attempt["result_file_error"] = json!(error.to_string()),
+                }
+                format!(
+                    "Process status: {}; result file error: {}",
+                    output.status, attempt["result_file_error"]
+                )
+            }
+            Err(error) => {
+                let field = if started {
+                    "wait_error"
+                } else {
+                    "launch_error"
+                };
+                attempt["process"][field] = json!(error.to_string());
+                error.to_string()
+            }
+        };
+        attempt["completed_at"] = json!(chrono::Utc::now().to_rfc3339());
+
+        PilotExecution {
+            started,
+            process_success,
+            terminal_result,
+            technical_error,
+        }
+    }
+
+    fn run_command(
+        &self,
+        operation: &str,
+        args: &[String],
+        amount: Option<u64>,
+        currency: Option<String>,
+    ) -> std::result::Result<(), ProcessError> {
+        let mut attempt = new_sb_attempt(operation);
+        attempt["amount_minor"] = json!(amount);
+        attempt["currency"] = json!(currency);
+        let execution = self.execute_pilot(args, &mut attempt);
+        // Keep the existing payment/totals success contract: process exit code 0.
+        if execution.process_success {
+            return Ok(());
+        }
+        let mut message = format!("Failed to run {operation} command");
+        if let Some(result) = execution
+            .terminal_result
+            .filter(|result| result.result_code > 0)
+        {
+            attempt["outcome"] = json!("declined");
+            message.push_str(&format!(
+                ": {}. Код терминала: {}",
+                result.result_text.trim().trim_end_matches('.'),
+                result.result_code
+            ));
+        } else if !execution.started {
+            attempt["outcome"] = json!("not_started");
+        }
+        Err(ProcessError {
+            message,
+            raw_data: json!({ "error": execution.technical_error, format!("{operation}_attempt"): attempt }),
+            input_data: amount.map(|value| value.to_string()),
         })
     }
 
@@ -366,24 +409,14 @@ impl Acquiring for SBAdapter {
     async fn payment(
         &mut self,
         amount: u64,
-        _: Option<String>,
+        currency: Option<String>,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
-        let mut cmd = self.get_cmd()?;
-        cmd.args(["1", &format!("{}", amount)]);
-
-        let res = cmd
-            .output()
-            .map_err(|e| ProcessError::from_error("Failed to run payment command", e))?;
-        let success = res.status.success();
-
-        if !success {
-            let code = res.status.code().unwrap_or(-1);
-            return Err(ProcessError::new_with_input(
-                "Failed to run payment command",
-                Value::String(format!("Operation status code: {code}")),
-                Some(format!("{amount}")),
-            ));
-        }
+        self.run_command(
+            "payment",
+            &["1".to_string(), amount.to_string()],
+            Some(amount),
+            currency,
+        )?;
 
         let e_strings = self.read_e().unwrap_or(SbPilotE::empty());
         let data = normalize_terminal_response(crate::ProtocolType::Ttk, &e_strings.as_hash_map());
@@ -416,21 +449,7 @@ impl Acquiring for SBAdapter {
     async fn totals(
         &mut self,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
-        let mut cmd = self.get_cmd()?;
-        cmd.arg("7");
-
-        let res = cmd
-            .output()
-            .map_err(|e| ProcessError::from_error("Failed to run totals command", e))?;
-        let success = res.status.success();
-
-        if !success {
-            let code = res.status.code().unwrap_or(-1);
-            return Err(ProcessError::new(
-                "Failed to run refund command",
-                Value::String(format!("Operation status code: {code}")),
-            ));
-        }
+        self.run_command("totals", &["7".to_string()], None, None)?;
 
         Ok(ProcessSuccess::new(
             "Totals command success",
@@ -448,6 +467,31 @@ impl Acquiring for SBAdapter {
             raw_result,
         ))
     }
+}
+
+struct PilotExecution {
+    started: bool,
+    process_success: bool,
+    terminal_result: Option<SbPilotE>,
+    technical_error: String,
+}
+
+fn new_sb_attempt(operation: &str) -> Value {
+    json!({
+        "attempt_id": format!("{:032x}", rand::random::<u128>()),
+        "operation": operation,
+        "validation_error": null,
+        "started_at": chrono::Utc::now().to_rfc3339(),
+        "completed_at": null,
+        "outcome": "unknown",
+        "terminal_response": null,
+        "terminal_result": null,
+        "result_file_error": null,
+        "process": {
+            "started": false, "success": null, "exit_code": null,
+            "stdout": null, "stderr": null, "launch_error": null, "wait_error": null,
+        },
+    })
 }
 
 #[derive(PartialEq, Eq)]
@@ -490,7 +534,7 @@ fn decode_sb_result(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
 }
 
 fn decode_sb_output(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| WINDOWS_1251.decode(bytes).0.into_owned())
+    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| decode_sb_result(bytes).into_owned())
 }
 
 #[derive(Debug, Clone)]
@@ -791,6 +835,111 @@ mod refund_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn payment_and_totals_preserve_bank_failure_diagnostics() {
+        for (operation, args, key) in [
+            (
+                "payment",
+                "test \"$#\" = 2 && test \"$1\" = 1 && test \"$2\" = 39000",
+                "payment_attempt",
+            ),
+            (
+                "totals",
+                "test \"$#\" = 1 && test \"$1\" = 7",
+                "totals_attempt",
+            ),
+        ] {
+            let script = format!(
+                "{args} || exit 88\ncp response e\necho diagnostic-output\necho diagnostic-error >&2\nexit 99"
+            );
+            let fixture = Fixture::new(&script, Some("362,Ошибка чтения карты"));
+            let mut adapter = fixture.adapter();
+            let error = if operation == "payment" {
+                adapter.payment(39000, None).await.unwrap_err()
+            } else {
+                adapter.totals().await.unwrap_err()
+            };
+            let attempt = &error.raw_data[key];
+            assert_eq!(attempt["process"]["exit_code"], 99);
+            assert_eq!(attempt["process"]["stdout"], "diagnostic-output\n");
+            assert_eq!(attempt["process"]["stderr"], "diagnostic-error\n");
+            assert_eq!(attempt["terminal_response"], "362,Ошибка чтения карты");
+            assert_eq!(attempt["terminal_result"]["result_code"], 362);
+            assert!(error.message.contains("Ошибка чтения карты"));
+            assert!(!error.message.contains("refund"));
+            assert_eq!(
+                error.input_data.as_deref(),
+                if operation == "payment" {
+                    Some("39000")
+                } else {
+                    None
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn totals_keeps_unreadable_or_stale_response_diagnostics() {
+        for response in [None, Some("invalid"), Some("362,old response")] {
+            let fixture = Fixture::new("echo failure >&2\nexit 99", None);
+            if let Some(response) = response {
+                fs::write(fixture.0.join("e"), response).unwrap();
+            }
+            let error = fixture.adapter().totals().await.unwrap_err();
+            let attempt = &error.raw_data["totals_attempt"];
+            assert_eq!(attempt["process"]["stderr"], "failure\n");
+            assert!(attempt["result_file_error"].is_string());
+            assert!(attempt["terminal_result"].is_null());
+            assert!(!error.message.contains("old response"));
+            assert_eq!(attempt["terminal_response"], json!(response));
+        }
+    }
+
+    #[tokio::test]
+    async fn totals_records_launch_failure() {
+        let fixture = Fixture::new("exit 0", None);
+        fs::remove_file(fixture.0.join("sb_pilot.exe")).unwrap();
+        let error = fixture.adapter().totals().await.unwrap_err();
+        let attempt = &error.raw_data["totals_attempt"];
+        assert_eq!(attempt["process"]["started"], false);
+        assert!(attempt["process"]["launch_error"].is_string());
+        assert!(attempt["process"]["exit_code"].is_null());
+    }
+
+    #[test]
+    fn decodes_russian_process_output() {
+        let text = "НЕТ СВЯЗИ С ТЕРМИНАЛОМ";
+        for bytes in [
+            text.as_bytes().to_vec(),
+            IBM866.encode(text).0.into_owned(),
+            WINDOWS_1251.encode(text).0.into_owned(),
+        ] {
+            assert_eq!(decode_sb_output(&bytes), text);
+        }
+    }
+
+    #[tokio::test]
+    async fn totals_preserves_fresh_malformed_response() {
+        let fixture = Fixture::new("cp response e\nexit 99", Some("broken response"));
+        let error = fixture.adapter().totals().await.unwrap_err();
+        let attempt = &error.raw_data["totals_attempt"];
+        assert_eq!(attempt["terminal_response"], "broken response");
+        assert!(attempt["terminal_result"].is_null());
+        assert!(attempt["result_file_error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn successful_payment_and_totals_keep_existing_responses() {
+        let fixture = Fixture::new("cp response e\nexit 0", Some("0,OK"));
+        let result = fixture.adapter().payment(39000, None).await.unwrap();
+        assert!(result.raw_data.is_string());
+        assert_eq!(result.data.is_approved, Some(true));
+        let fixture = Fixture::new("exit 0", None);
+        let result = fixture.adapter().totals().await.unwrap();
+        assert!(result.raw_data.is_null());
+        assert_eq!(result.message, "Totals command success");
     }
 
     const WRITE_RESPONSE: &str = "test \"$1\" = 3 && test \"$2\" = 39000 || exit 88\ncp \"$(dirname \"$0\")/response\" \"$(dirname \"$0\")/e\"\necho diagnostic-output\necho diagnostic-error >&2\nexit 99";
