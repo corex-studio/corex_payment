@@ -301,16 +301,28 @@ impl SBAdapter {
         ])
     }
 
+    pub(crate) fn tcp_port(&self) -> u32 {
+        self.config.port.unwrap_or(9600)
+    }
+
+    pub(crate) fn validate_pinpad_ini(&self, path: &Path) -> Result<()> {
+        let ini = IniEditor::load(path)?;
+        let expected = match self.config.connection_type {
+            ConnectionType::Usb => self.configure_usb()?,
+            ConnectionType::Tcp => self.configure_tcp()?,
+            // check_port reports unsupported connection types.
+            ConnectionType::Bluetooth => return Ok(()),
+        };
+        ini.validate(&expected)
+    }
+
     fn configure_tcp(&self) -> Result<Vec<IniEdit>> {
         let address = match &self.config.address {
             Some(v) => v,
             None => return Err(anyhow!("Param ncom is missing")),
         };
 
-        let port = match self.config.port {
-            Some(v) => v.to_string(),
-            None => "9600".to_string(),
-        };
+        let port = self.tcp_port().to_string();
 
         Ok(vec![
             IniEdit::SetValue {
@@ -571,6 +583,30 @@ impl Display for IniEditor {
 }
 
 impl IniEditor {
+    fn validate(&self, expected: &[IniEdit]) -> Result<()> {
+        for edit in expected {
+            let (key, value) = match edit {
+                IniEdit::SetValue { key, value } => (key, Some(value.as_str())),
+                IniEdit::CommentOut { key } => (key, None),
+            };
+            let mut found = false;
+            for (name, actual) in self.lines.iter().filter_map(|line| line.split_once('=')) {
+                if name.trim().eq_ignore_ascii_case(key) {
+                    found = true;
+                    if Some(actual.trim()) != value {
+                        return Err(anyhow!(
+                            "Параметр {key} не соответствует настройкам подключения"
+                        ));
+                    }
+                }
+            }
+            if value.is_some() && !found {
+                return Err(anyhow!("Отсутствует активный параметр {key}"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         let lines = content.lines().map(|s| s.to_string()).collect();
