@@ -234,29 +234,33 @@ impl SBAdapter {
         args: &[String],
         amount: Option<u64>,
         currency: Option<String>,
-    ) -> std::result::Result<(), ProcessError> {
+    ) -> std::result::Result<SbPilotE, ProcessError> {
         let mut attempt = new_sb_attempt(operation);
         attempt["amount_minor"] = json!(amount);
         attempt["currency"] = json!(currency);
         let execution = self.execute_pilot(args, &mut attempt);
-        // Keep the existing payment/totals success contract: process exit code 0.
-        if execution.process_success {
-            return Ok(());
-        }
-        let mut message = format!("Failed to run {operation} command");
-        if let Some(result) = execution
-            .terminal_result
-            .filter(|result| result.result_code > 0)
-        {
-            attempt["outcome"] = json!("declined");
-            message.push_str(&format!(
-                ": {}. Код терминала: {}",
-                result.result_text.trim().trim_end_matches('.'),
-                result.result_code
-            ));
-        } else if !execution.started {
-            attempt["outcome"] = json!("not_started");
-        }
+        let message = match execution.terminal_result {
+            Some(result) if result.result_code == 0 && execution.process_success => {
+                return Ok(result);
+            }
+            Some(result) if result.result_code > 0 => {
+                attempt["outcome"] = json!("declined");
+                format!(
+                    "Failed to run {operation} command: {}. Код терминала: {}",
+                    result.result_text.trim().trim_end_matches('.'),
+                    result.result_code
+                )
+            }
+            _ => {
+                if !execution.started {
+                    attempt["outcome"] = json!("not_started");
+                }
+                match operation {
+                    "payment" => "Результат оплаты не подтверждён".to_string(),
+                    _ => "Результат сверки не подтверждён".to_string(),
+                }
+            }
+        };
         Err(ProcessError {
             message,
             raw_data: json!({ "error": execution.technical_error, format!("{operation}_attempt"): attempt }),
@@ -411,20 +415,20 @@ impl Acquiring for SBAdapter {
         amount: u64,
         currency: Option<String>,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
-        self.run_command(
+        let terminal_result = self.run_command(
             "payment",
             &["1".to_string(), amount.to_string()],
             Some(amount),
             currency,
         )?;
 
-        let e_strings = self.read_e().unwrap_or(SbPilotE::empty());
-        let data = normalize_terminal_response(crate::ProtocolType::Ttk, &e_strings.as_hash_map());
+        let data =
+            normalize_terminal_response(self.config.protocol, &terminal_result.as_hash_map());
 
         Ok(ProcessSuccess::new(
             "Payment command success",
             data,
-            Value::String(format!("{:?}", e_strings)),
+            Value::String(format!("{terminal_result:?}")),
         ))
     }
 
@@ -449,11 +453,23 @@ impl Acquiring for SBAdapter {
     async fn totals(
         &mut self,
     ) -> std::result::Result<ProcessSuccess<NormalizedTransactionData>, ProcessError> {
+        let report_path = self.dir.join("p");
+        let previous = read_sb_result_snapshot(&report_path);
         self.run_command("totals", &["7".to_string()], None, None)?;
 
+        let mut data = NormalizedTransactionData::empty();
+        if let Ok(report) = read_sb_result_snapshot(&report_path) {
+            let fresh = match previous {
+                Ok(old) => old != report,
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            };
+            if fresh {
+                data.raw.insert("p".into(), decode_sb_output(&report.bytes));
+            }
+        }
         Ok(ProcessSuccess::new(
             "Totals command success",
-            NormalizedTransactionData::empty(),
+            data,
             Value::Null,
         ))
     }
@@ -932,14 +948,97 @@ mod refund_tests {
 
     #[tokio::test]
     async fn successful_payment_and_totals_keep_existing_responses() {
-        let fixture = Fixture::new("cp response e\nexit 0", Some("0,OK"));
+        let fixture = Fixture::new(
+            "cp response e",
+            Some(
+                "0,OK\n1234****5678\n12/30\nAUTH42\n7\nCard\n1\nTERM42\n20261119123456\n000000000042",
+            ),
+        );
         let result = fixture.adapter().payment(39000, None).await.unwrap();
         assert!(result.raw_data.is_string());
         assert_eq!(result.data.is_approved, Some(true));
-        let fixture = Fixture::new("exit 0", None);
+        assert_eq!(result.data.authorization_code.as_deref(), Some("AUTH42"));
+        assert_eq!(result.data.terminal_id.as_deref(), Some("TERM42"));
+        assert_eq!(result.data.raw["rrn"], "000000000042");
+        let fixture = Fixture::new("cp response e && cp report p", Some("0,OK"));
+        let report = "  Сверка итогов\r\nИтоги совпали\r\n";
+        fs::write(fixture.0.join("report"), IBM866.encode(report).0).unwrap();
         let result = fixture.adapter().totals().await.unwrap();
         assert!(result.raw_data.is_null());
         assert_eq!(result.message, "Totals command success");
+        assert_eq!(result.data.raw["p"], report);
+    }
+
+    #[tokio::test]
+    async fn payment_returns_fresh_decline_on_successful_exit() {
+        let fixture = Fixture::new("cp response e", Some("362,Ошибка чтения карты"));
+        let error = fixture.adapter().payment(39000, None).await.unwrap_err();
+        assert!(error.message.contains("362"));
+        assert!(error.message.contains("Ошибка чтения карты"));
+        let attempt = &error.raw_data["payment_attempt"];
+        assert_eq!(attempt["outcome"], "declined");
+        assert_eq!(attempt["process"]["exit_code"], 0);
+        assert_eq!(attempt["terminal_result"]["result_code"], 362);
+    }
+
+    #[tokio::test]
+    async fn payment_requires_confirmed_result() {
+        for (script, previous, response) in [
+            ("exit 0", Some("0,OK"), None),
+            ("exit 0", None, None),
+            ("cp response e", None, Some("invalid")),
+            ("cp response e\nexit 99", None, Some("0,OK")),
+        ] {
+            let fixture = Fixture::new(script, response);
+            if let Some(previous) = previous {
+                fs::write(fixture.0.join("e"), previous).unwrap();
+            }
+            let error = fixture.adapter().payment(39000, None).await.unwrap_err();
+            assert!(error.message.contains("Результат оплаты не подтверждён"));
+            assert_eq!(error.raw_data["payment_attempt"]["outcome"], "unknown");
+        }
+    }
+
+    #[tokio::test]
+    async fn totals_returns_fresh_decline_on_successful_exit() {
+        let fixture = Fixture::new("cp response e\nexit 0", Some("362,Ошибка чтения карты"));
+        let error = fixture.adapter().totals().await.unwrap_err();
+        assert!(error.message.contains("Ошибка чтения карты"));
+        assert!(error.message.contains("362"));
+        let attempt = &error.raw_data["totals_attempt"];
+        assert_eq!(attempt["process"]["exit_code"], 0);
+        assert_eq!(attempt["terminal_result"]["result_code"], 362);
+        assert_eq!(attempt["outcome"], "declined");
+    }
+
+    #[tokio::test]
+    async fn totals_requires_matching_process_and_terminal_success() {
+        for (script, response, previous) in [
+            ("exit 0", None, None),
+            ("exit 0", None, Some("0,OK")),
+            ("cp response e", Some("invalid"), None),
+            ("cp response e\nexit 99", Some("0,OK"), None),
+        ] {
+            let fixture = Fixture::new(script, response);
+            if let Some(previous) = previous {
+                fs::write(fixture.0.join("e"), previous).unwrap();
+            }
+            let error = fixture.adapter().totals().await.unwrap_err();
+            assert!(error.message.contains("Результат сверки не подтверждён"));
+            assert_eq!(error.raw_data["totals_attempt"]["outcome"], "unknown");
+        }
+    }
+
+    #[tokio::test]
+    async fn confirmed_totals_omits_missing_or_stale_report() {
+        for previous in [None, Some("old receipt")] {
+            let fixture = Fixture::new("cp response e", Some("0,OK"));
+            if let Some(previous) = previous {
+                fs::write(fixture.0.join("p"), previous).unwrap();
+            }
+            let result = fixture.adapter().totals().await.unwrap();
+            assert!(!result.data.raw.contains_key("p"));
+        }
     }
 
     const WRITE_RESPONSE: &str = "test \"$1\" = 3 && test \"$2\" = 39000 || exit 88\ncp \"$(dirname \"$0\")/response\" \"$(dirname \"$0\")/e\"\necho diagnostic-output\necho diagnostic-error >&2\nexit 99";
